@@ -51,7 +51,7 @@ pip install -r requirements.txt
 python run.py
 ```
 
-브라우저가 `http://127.0.0.1:8000` 으로 자동으로 열림. 종료는 `Ctrl+C`.
+브라우저가 `http://127.0.0.1:8020` 으로 자동으로 열림. 종료는 `Ctrl+C`.
 
 > `cadquery` 가 약 200MB라 첫 설치에 몇 분 걸림. 급하면 아래 최소 구성으로 먼저
 > 띄워도 됨 — 스튜디오·회로 에디터·분배 예측은 전부 동작하고 STEP 생성 버튼만
@@ -86,8 +86,8 @@ python run.py
 |---|---|
 | `Activate.ps1 ... 실행할 수 없습니다` | 위 `Set-ExecutionPolicy -Scope Process ...` 를 먼저 실행 |
 | `py` 명령 없음 | `python -m venv .venv` 로 대체 (Python 3.10+ 필요) |
-| `Address already in use` | `python run.py --port 8080` |
-| 브라우저가 안 열림 | 주소창에 직접 `http://127.0.0.1:8000` |
+| `Address already in use` | `python run.py --port 8021` |
+| 브라우저가 안 열림 | 주소창에 직접 `http://127.0.0.1:8020` |
 | STEP 버튼 비활성 | `pip install cadquery` 후 서버 재시작. `/api/health` 로 확인 |
 | 코드 수정하며 개발 | `python run.py --reload` |
 

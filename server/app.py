@@ -1,7 +1,7 @@
 """
 FT-HX CFD Studio — 로컬 서버
 
-    python run.py           →  http://127.0.0.1:8000
+    python run.py           →  http://127.0.0.1:8020
 
 정적 스튜디오(web/index.html)를 서빙하고, 브라우저에서 만든 형상·회로를
 그대로 STEP 으로 뽑을 수 있는 API 를 제공함.
