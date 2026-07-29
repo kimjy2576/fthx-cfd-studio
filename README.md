@@ -31,22 +31,65 @@
 
 ## 빠른 시작
 
-```bash
-git clone https://github.com/<사용자>/fthx-cfd-studio.git
+### Windows (PowerShell) — 처음 한 번
+
+아래 블록을 통째로 복사해 붙여넣으면 됨.
+
+```powershell
+# 실행 정책 때문에 가상환경 활성화가 막히는 경우 대비 (현재 창에만 적용)
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+
+git clone https://github.com/kimjy2576/fthx-cfd-studio.git
 cd fthx-cfd-studio
 
-python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+python -m pip install -U pip
 pip install -r requirements.txt
 
-python run.py            # → http://127.0.0.1:8000 자동으로 열림
+python run.py
 ```
 
-`cadquery`(약 200MB)와 `CoolProp` 없이도 서버는 뜸. STEP 생성과 물성 조회만
-비활성화되고, 나머지 기능은 그대로 동작함.
+브라우저가 `http://127.0.0.1:8000` 으로 자동으로 열림. 종료는 `Ctrl+C`.
+
+> `cadquery` 가 약 200MB라 첫 설치에 몇 분 걸림. 급하면 아래 최소 구성으로 먼저
+> 띄워도 됨 — 스튜디오·회로 에디터·분배 예측은 전부 동작하고 STEP 생성 버튼만
+> 비활성화됨.
+>
+> ```powershell
+> pip install pydantic numpy scipy fastapi "uvicorn[standard]"
+> python run.py
+> ```
+
+### Windows — 두 번째부터
+
+```powershell
+cd fthx-cfd-studio
+.\.venv\Scripts\Activate.ps1
+python run.py
+```
+
+### macOS / Linux
 
 ```bash
-pip install pydantic numpy scipy fastapi "uvicorn[standard]"   # 최소 설치
+git clone https://github.com/kimjy2576/fthx-cfd-studio.git
+cd fthx-cfd-studio
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python run.py
 ```
+
+### 자주 걸리는 것
+
+| 증상 | 대응 |
+|---|---|
+| `Activate.ps1 ... 실행할 수 없습니다` | 위 `Set-ExecutionPolicy -Scope Process ...` 를 먼저 실행 |
+| `py` 명령 없음 | `python -m venv .venv` 로 대체 (Python 3.10+ 필요) |
+| `Address already in use` | `python run.py --port 8080` |
+| 브라우저가 안 열림 | 주소창에 직접 `http://127.0.0.1:8000` |
+| STEP 버튼 비활성 | `pip install cadquery` 후 서버 재시작. `/api/health` 로 확인 |
+| 코드 수정하며 개발 | `python run.py --reload` |
 
 ### 브라우저 없이 쓰기
 
