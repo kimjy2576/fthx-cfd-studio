@@ -15,6 +15,7 @@ FT-HX CAD 생성기 (CadQuery / OCC)
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 from pathlib import Path
@@ -174,8 +175,13 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
     # ---- 입구 플레넘 / 출구 헤더 + 피더 (다중 입출구 처리) ----
     plen_meta = None
     if plenum is not None:
+        clr = DST.check_clearances(p, cs, plenum)
+        if plenum.auto_offset and not clr["offset_ok"]:
+            plenum = dataclasses.replace(plenum, offset=clr["min_offset_mm"] + 2.0)
+            clr = DST.check_clearances(p, cs, plenum)
         plen_meta = {"D_plenum_mm": plenum.D_plenum, "offset_mm": plenum.offset,
-                     "D_feed_mm": plenum.D_feed, "jumps": [], "plenums": []}
+                     "D_feed_mm": plenum.D_feed, "clearance": clr,
+                     "jumps": [], "plenums": []}
         by = {}
         for prt in rep["ports"]:
             by.setdefault((prt["kind"], prt["end"]), []).append(prt)

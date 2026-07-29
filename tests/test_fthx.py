@@ -366,3 +366,49 @@ def test_bend_solid_volume_matches_path(kw):
     cad = sum(c.obj.Volume() for c in assy.children
               if c.name.startswith("fluid_bend_"))
     assert cad == pytest.approx(sum(b.path_len * A for b in bends), rel=1e-9)
+
+
+# ─────────────────────── 간섭 검사 확장 (v0.5.0) ───────────────────────
+@needs_cp
+def test_default_layout_has_no_clearance_conflict(p):
+    r = DST.check_clearances(p, CQC.gen_face_split(p, 5), DST.PlenumSpec())
+    assert r["ok"] and r["offset_ok"]
+
+
+@needs_cp
+def test_plenum_conflict_is_resolvable_by_offset():
+    """플레넘↔벤드는 거리를 늘리면 풀림"""
+    q = FTHXParams(bend={"R_over_D": 1.0, "leg": 20})
+    cs = CQC.gen_face_split(q, 5)
+    tight = DST.check_clearances(q, cs, DST.PlenumSpec(offset=25))
+    assert tight["plenum_vs_bend"]["n"] > 0 and not tight["offset_ok"]
+    ok = DST.check_clearances(q, cs, DST.PlenumSpec(offset=tight["min_offset_mm"] + 2))
+    assert ok["ok"]
+
+
+@needs_cp
+def test_feeder_conflict_is_structural():
+    """입출구 관이 다른 벤드 아래 깔리면 offset 으로 못 풂 → 회로를 바꿔야 함"""
+    q = FTHXParams()
+    rest = [t for t in range(q.tube.Nr * q.tube.Nt) if t not in (0, 1, 2, 3)]
+    cs = CQC.CircuitSet(circuits=[
+        CQC.Circuit(id="cA", tubes=[0, 2], inlet_end="z0"),
+        CQC.Circuit(id="cB", tubes=[1, 3], inlet_end="z1"),
+        CQC.Circuit(id="cR", tubes=rest, inlet_end="z0")])
+    r = DST.check_clearances(q, cs, DST.PlenumSpec())
+    assert r["feeder_vs_bend"]["n"] >= 1
+    assert any(h["port"] == "ref_inlet_cB" for h in r["feeder_vs_bend"]["hits"])
+    far = DST.check_clearances(q, cs, DST.PlenumSpec(offset=200))
+    assert far["feeder_vs_bend"]["n"] >= 1        # 거리를 늘려도 그대로
+
+
+@needs_cad
+@needs_cp
+def test_auto_offset_resolves_and_is_reported():
+    q = FTHXParams(bend={"R_over_D": 1.0, "leg": 20})
+    cs = CQC.gen_face_split(q, 5)
+    _, m1 = CAD.build(q, cs, DST.PlenumSpec(offset=25))
+    assert m1["plenum"]["clearance"]["plenum_vs_bend"]["n"] > 0
+    _, m2 = CAD.build(q, cs, DST.PlenumSpec(offset=25, auto_offset=True))
+    assert m2["plenum"]["clearance"]["ok"]
+    assert m2["plenum"]["offset_mm"] > 25

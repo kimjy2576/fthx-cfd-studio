@@ -65,6 +65,7 @@ class PlenumSpec:
     D_feed: float = 4.0           # mm, 피더 내경 (모세관 상당)
     split_frac: float = 0.5       # 피더를 둘로 쪼개는 위치 (porous jump 면)
     jump_thick: float = 1.0       # mm, porous jump 매질 두께
+    auto_offset: bool = False     # 벤드와 안 겹치도록 offset 자동 확대
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -203,3 +204,98 @@ def legs_from_circuits(p: FTHXParams, cs: CQC.CircuitSet,
         legs.append(Leg(cid=c["id"], L_path=c["path_mm"],
                         n_bend=c["n_bend"], L_feed=L_feed))
     return legs
+
+
+# ══════════════════════════════════════════════════════════════════
+#  간섭 검사 — 피더 · 플레넘 ↔ 벤드
+# ══════════════════════════════════════════════════════════════════
+def _feeder_polyline(p: FTHXParams, port: dict, pl: PlenumSpec,
+                     n: int = 40) -> "np.ndarray":
+    import numpy as np
+    xy = CQC.tube_xy(p)
+    z0, z1 = CQC.z_ends(p)
+    t = port["tube"]
+    zc = z0 if port["end"] == "z0" else z1
+    sgn = -1.0 if port["end"] == "z0" else 1.0
+    zz = np.linspace(zc, zc + sgn * pl.offset, n)
+    return np.column_stack([np.full(n, xy[t][0]), np.full(n, xy[t][1]), zz])
+
+
+def _plenum_groups(p: FTHXParams, ports, pl: PlenumSpec) -> dict:
+    """(kind, end) 별 플레넘 축·반경. cad.build 와 동일한 규칙."""
+    xy = CQC.tube_xy(p)
+    z0, z1 = CQC.z_ends(p)
+    out = {}
+    by = {}
+    for q in ports:
+        by.setdefault((q["kind"], q["end"]), []).append(q)
+    for (kind, end), lst in by.items():
+        xs = [xy[q["tube"]][0] for q in lst]
+        ys = [xy[q["tube"]][1] for q in lst]
+        Dp = max(pl.D_plenum, (max(xs) - min(xs)) + pl.D_feed + 4.0)
+        zc = z0 if end == "z0" else z1
+        sgn = -1.0 if end == "z0" else 1.0
+        out[(kind, end)] = {"x": sum(xs) / len(xs), "z": zc + sgn * pl.offset,
+                            "D": Dp, "y0": min(ys) - Dp * 0.6, "y1": max(ys) + Dp * 0.6}
+    return out
+
+
+def check_clearances(p: FTHXParams, cs: "CQC.CircuitSet", pl: PlenumSpec,
+                     clearance: float = 1.0) -> dict:
+    """피더·플레넘과 벤드 사이 간섭을 검사.
+
+    두 종류의 성격이 다름:
+      · 플레넘 ↔ 벤드  → offset 을 늘리면 풀림 (해소 가능)
+      · 피더   ↔ 벤드  → 피더가 관 끝~플레넘 전 구간을 지나므로 거리로 안 풀림.
+                         해당 관을 입출구로 쓸 수 없음 → 회로를 바꿔야 함 (구조적)
+    """
+    import numpy as np
+    rep = CQC.build(p, cs)
+    bends = CQC.derive_bends(p, cs)
+    resolve_standoff = CQC.resolve_standoff
+    resolve_standoff(p, bends)
+    ports = rep["ports"]
+    polys = {id(b): CQC.bend_polyline(p, b) for b in bends}
+
+    feeder_hits, plenum_hits = [], []
+    thr_f = (p.tube.Do + pl.D_feed) / 2 + clearance
+
+    for q in ports:
+        F = _feeder_polyline(p, q, pl)
+        for b in bends:
+            if b.end != q["end"] or q["tube"] in (b.a, b.b):
+                continue
+            d = float(np.min(np.linalg.norm(F[:, None, :] - polys[id(b)][None, :, :], axis=2)))
+            if d < thr_f:
+                feeder_hits.append({"port": q["name"], "bend": f"{b.circuit}#{b.k}",
+                                    "end": q["end"], "dist_mm": round(d, 2),
+                                    "limit_mm": round(thr_f, 2)})
+
+    groups = _plenum_groups(p, ports, pl)
+    need = {}
+    for (kind, end), g in groups.items():
+        thr_p = g["D"] / 2 + p.tube.Do / 2 + clearance
+        sgn = -1.0 if end == "z0" else 1.0
+        for b in bends:
+            if b.end != end:
+                continue
+            P = polys[id(b)]
+            inside = (P[:, 1] >= g["y0"]) & (P[:, 1] <= g["y1"])
+            if not inside.any():
+                continue
+            d = float(np.min(np.hypot(P[inside, 0] - g["x"], P[inside, 2] - g["z"])))
+            if d < thr_p:
+                plenum_hits.append({"plenum": f"{kind}_{end}", "bend": f"{b.circuit}#{b.k}",
+                                    "dist_mm": round(d, 2), "limit_mm": round(thr_p, 2)})
+            reach = float(np.max(sgn * (P[inside, 2] - (0.0 if end == "z0" else p.tube.L))))
+            need[(kind, end)] = max(need.get((kind, end), 0.0), reach + thr_p)
+
+    min_off = round(max(need.values()), 1) if need else 0.0
+    return {"clearance_mm": clearance,
+            "feeder_vs_bend": {"n": len(feeder_hits), "structural": True,
+                               "hits": feeder_hits[:10]},
+            "plenum_vs_bend": {"n": len(plenum_hits), "resolvable": True,
+                               "hits": plenum_hits[:10]},
+            "offset_mm": pl.offset, "min_offset_mm": min_off,
+            "offset_ok": pl.offset >= min_off - 1e-9,
+            "ok": not feeder_hits and not plenum_hits}
