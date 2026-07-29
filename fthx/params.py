@@ -65,6 +65,17 @@ class FinSpec(BaseModel):
         return self
 
 
+class DuctSpec(BaseModel):
+    """코일을 감싸는 덕트/케이싱. 핀 팩과의 간극이 곧 공기 바이패스 유로임.
+       gap = 0 이면 완전 밀폐(기존 동작)."""
+    gap_y: float = Field(0.0, ge=0, description="핀 가장자리 ~ 덕트 벽 (상·하 각각) [mm]")
+    gap_z: float = Field(0.0, ge=0, description="핀 팩 끝 ~ 덕트 벽 (양단 각각) [mm]")
+
+    @property
+    def sealed(self) -> bool:
+        return self.gap_y <= 0 and self.gap_z <= 0
+
+
 class DomainSpec(BaseModel):
     L_up: float = Field(100.0, ge=0, description="상류 연장 [mm]")
     L_down: float = Field(200.0, ge=0, description="하류 연장 [mm]")
@@ -79,6 +90,7 @@ class FTHXParams(BaseModel):
     tube: TubeSpec = Field(default_factory=TubeSpec)
     fin: FinSpec = Field(default_factory=FinSpec)
     domain: DomainSpec = Field(default_factory=DomainSpec)
+    duct: DuctSpec = Field(default_factory=DuctSpec)
 
     # ---------- 형상 배치 ----------
     def tube_centers(self) -> List[Tuple[int, int, float, float]]:
@@ -116,6 +128,15 @@ class FTHXParams(BaseModel):
         b = self.fin_pack
         return (b["x0"], b["x1"], b["y0"], b["y1"], b["z0"], b["z1"])
 
+    @property
+    def duct_box(self) -> dict:
+        """공기 도메인 단면. 핀 팩 + 간극."""
+        b, d = self.fin_pack, self.duct
+        return {"x0": b["x0"], "x1": b["x1"],
+                "y0": b["y0"] - d.gap_y, "y1": b["y1"] + d.gap_y,
+                "z0": b["z0"] - d.gap_z, "z1": b["z1"] + d.gap_z,
+                "sealed": d.sealed}
+
     @model_validator(mode="after")
     def _check_fin_pack(self):
         b = self.fin_pack
@@ -126,6 +147,10 @@ class FTHXParams(BaseModel):
                              f"(관 0~{self.tube.L})")
         if b["edge_y"] <= self.tube.Do / 2:
             raise ValueError(f"edge_y({b['edge_y']}) ≤ Do/2 — 핀이 관을 못 덮음")
+        dk = self.duct_box
+        if dk["z0"] < -1e-9 or dk["z1"] > self.tube.L + 1e-9:
+            raise ValueError(f"덕트가 관 길이를 벗어남: z {dk['z0']:.1f}~{dk['z1']:.1f} "
+                             f"(관 0~{self.tube.L}). gap_z 를 줄일 것")
         return self
 
     # ---------- closure 입력용 파생량 (Wang 정의) ----------
@@ -164,9 +189,28 @@ class FTHXParams(BaseModel):
             "porosity_gamma": 1.0 - V_fin_solid / V_zone,
             "a_v_1perm": (A_o / V_zone) * 1000.0,               # [1/m]
             "A_o_over_A_c": A_o / A_c,
+            **self._bypass_metrics(H, L),
             "depth_mm": W, "height_mm": H, "tube_len_mm": L,
             "n_tube": n_tube,
         }
+
+    def _bypass_metrics(self, H: float, L: float) -> dict:
+        """덕트 간극(바이패스) 지표. 면적비가 작아도 저항이 훨씬 낮아
+           유량 분율은 그보다 크게 나옴 — 실제 값은 CFD 가 풀어줌."""
+        d, dk = self.duct, self.duct_box
+        Hd, Ld = dk["y1"] - dk["y0"], dk["z1"] - dk["z0"]
+        A_duct, A_core = Hd * Ld, H * L
+        A_by = A_duct - A_core
+        out = {"duct_H_mm": Hd, "duct_L_mm": Ld, "A_duct_mm2": A_duct,
+               "A_bypass_mm2": A_by, "bypass_area_frac": A_by / A_duct,
+               "sealed": dk["sealed"]}
+        W = self.core_bbox[1] - self.core_bbox[0]
+        if d.gap_y > 0:      # 상·하 슬롯: 폭 L, 높이 gap_y
+            out["Dh_bypass_y_mm"] = 4 * (d.gap_y * L) / (2 * (d.gap_y + L))
+        if d.gap_z > 0:      # 좌·우 슬롯: 폭 H, 높이 gap_z
+            out["Dh_bypass_z_mm"] = 4 * (d.gap_z * H) / (2 * (d.gap_z + H))
+        out["bypass_depth_mm"] = W
+        return out
 
     # ---------- HX-Sim 연동 ----------
     @classmethod

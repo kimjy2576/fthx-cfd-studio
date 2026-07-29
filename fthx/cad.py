@@ -50,6 +50,7 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
           plenum: "DST.PlenumSpec | None" = None) -> tuple[cq.Assembly, dict]:
     t, f, d = p.tube, p.fin, p.domain
     x0, x1, y0, y1, z0, z1 = p.core_bbox      # 핀 팩(포러스 코어)
+    dk = p.duct_box                            # 공기 도메인 단면(덕트)
     tz_lo, tz_hi = p.tube_z                   # 관 실제 범위
     centers = p.tube_centers()
     n_tube = t.Nr * t.Nt
@@ -86,23 +87,37 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
     assy = cq.Assembly(name=p.name)
 
     # ---- 공기측 ----
-    if d.L_up > 0:
-        assy.add(_box(x0 - d.L_up, x0, y0, y1, z0, z1),
-                 name="fluid_air_up", color=cq.Color(0.6, 0.8, 1.0, 0.3))
+    def _ext(xa, xb, tag, col):
+        """상·하류 연장. 덕트 간극이 있으면 핀 팩 경계에서 쪼개
+           코어열·바이패스열과 각각 conformal 하게 맞물리도록 함."""
+        full = _box(xa, xb, dk["y0"], dk["y1"], dk["z0"], dk["z1"])
+        if dk["sealed"]:
+            assy.add(full, name=f"fluid_air_{tag}", color=col)
+            return
+        inner = _box(xa, xb, y0, y1, z0, z1)
+        assy.add(inner, name=f"fluid_air_{tag}_core", color=col)
+        assy.add(full.cut(inner), name=f"fluid_air_{tag}_bypass", color=col)
 
-    if d.split_core_by_row:
-        for r in range(t.Nr):
-            slab = _box(x0 + r * t.Pl, x0 + (r + 1) * t.Pl, y0, y1, z0, z1)
-            assy.add(slab.cut(outer_by_row[r]), name=f"fluid_air_core_r{r+1:02d}",
-                     color=cq.Color(0.3, 0.9, 0.5, 0.35))
-    else:
-        core = _box(x0, x1, y0, y1, z0, z1)
-        assy.add(core.cut(outer_all), name="fluid_air_core",
+    if d.L_up > 0:
+        _ext(x0 - d.L_up, x0, "up", cq.Color(0.6, 0.8, 1.0, 0.3))
+
+    n_slab = t.Nr if d.split_core_by_row else 1
+    sw = (x1 - x0) / n_slab
+    for r in range(n_slab):
+        xa, xb = x0 + r * sw, x0 + (r + 1) * sw
+        cut = outer_by_row[r] if d.split_core_by_row else outer_all
+        tag = f"_r{r+1:02d}" if d.split_core_by_row else ""
+        fin_slab = _box(xa, xb, y0, y1, z0, z1)
+        assy.add(fin_slab.cut(cut), name=f"fluid_air_core{tag}",
                  color=cq.Color(0.3, 0.9, 0.5, 0.35))
+        if not dk["sealed"]:                       # 덕트 간극 = 바이패스 유로
+            duct_slab = _box(xa, xb, dk["y0"], dk["y1"], dk["z0"], dk["z1"])
+            byp = duct_slab.cut(_box(xa, xb, y0, y1, z0, z1)).cut(cut)
+            assy.add(byp, name=f"fluid_air_bypass{tag}",
+                     color=cq.Color(0.95, 0.85, 0.4, 0.35))
 
     if d.L_down > 0:
-        assy.add(_box(x1, x1 + d.L_down, y0, y1, z0, z1),
-                 name="fluid_air_down", color=cq.Color(1.0, 0.7, 0.5, 0.3))
+        _ext(x1, x1 + d.L_down, "down", cq.Color(1.0, 0.7, 0.5, 0.3))
 
     # ---- 관 ----
     for (r, i, x, y) in centers:
@@ -176,7 +191,7 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
                         "thickness_mm": plenum.jump_thick})
 
     # ---- 메타데이터 (메시 저널이 좌표로 면을 집게 함) ----
-    yc, zc = (y0 + y1) / 2, (z0 + z1) / 2
+    yc, zc = (dk["y0"] + dk["y1"]) / 2, (dk["z0"] + dk["z1"]) / 2
     meta = {
         "name": p.name,
         "units": "mm",
@@ -185,14 +200,15 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
         "ft_spec_SI": p.to_ft_spec(),
         "core_bbox": {"x": [x0, x1], "y": [y0, y1], "z": [z0, z1]},
         "fin_pack": p.fin_pack,
+        "duct_box": dk,
         "tube_z": [tz_lo, tz_hi],
         "face_seeds": {
             "air_inlet":  [x0 - d.L_up, yc, zc],
             "air_outlet": [x1 + d.L_down, yc, zc],
-            "casing_y_min": [(x0 + x1) / 2, y0, zc],
-            "casing_y_max": [(x0 + x1) / 2, y1, zc],
-            "side_z_min": [(x0 + x1) / 2, yc, z0],
-            "side_z_max": [(x0 + x1) / 2, yc, z1],
+            "duct_y_min": [(x0 + x1) / 2, dk["y0"], zc],
+            "duct_y_max": [(x0 + x1) / 2, dk["y1"], zc],
+            "duct_z_min": [(x0 + x1) / 2, yc, dk["z0"]],
+            "duct_z_max": [(x0 + x1) / 2, yc, dk["z1"]],
         },
         "zone_prefix": {"fluid_air_": "fluid", "fluid_ref_": "fluid",
                         "solid_": "solid", "fluid_air_core": "porous"},

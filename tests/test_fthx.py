@@ -258,3 +258,65 @@ def test_tubes_extend_beyond_fin_pack():
     core = sum(v.Volume() for k, v in B.items() if k.startswith("fluid_air_core"))
     assert core == pytest.approx(p.derived()["V_zone_mm3"], rel=1e-9)
     assert all(q["seed"][2] in (0.0, p.tube.L) for q in meta["circuits"]["ports"])
+
+
+# ─────────────────────────── 덕트 · 바이패스 (v0.5.0) ───────────────────────────
+def test_duct_sealed_by_default(p):
+    assert p.duct_box["sealed"] is True
+    assert p.derived()["bypass_area_frac"] == 0.0
+
+
+def test_bypass_metrics():
+    q = FTHXParams(fin={"FPI": 14, "t_f": 0.115, "L_fin": 440},
+                   duct={"gap_y": 6, "gap_z": 8})
+    d = q.derived()
+    assert d["duct_H_mm"] == pytest.approx(317.5 + 12, abs=1e-9)
+    assert d["duct_L_mm"] == pytest.approx(440 + 16, abs=1e-9)
+    assert d["bypass_area_frac"] == pytest.approx(0.0702, abs=5e-4)
+    assert d["Dh_bypass_y_mm"] > 0 and d["Dh_bypass_z_mm"] > 0
+
+
+def test_duct_validator():
+    with pytest.raises(ValueError):
+        FTHXParams(duct={"gap_z": 40})          # 덕트가 관 길이를 벗어남
+
+
+@needs_cad
+def test_bypass_partition_is_exact():
+    """코어 + 바이패스 = 덕트 체적 − 관 체적 (겹침·틈 없음)"""
+    import math
+    q = FTHXParams(fin={"FPI": 14, "t_f": 0.115, "L_fin": 440},
+                   duct={"gap_y": 6, "gap_z": 8})
+    assy, _ = CAD.build(q, CQC.gen_face_split(q, 4))
+    B = {c.name: c.obj for c in assy.children}
+    core = sum(v.Volume() for k, v in B.items() if k.startswith("fluid_air_core"))
+    byp = sum(v.Volume() for k, v in B.items() if k.startswith("fluid_air_bypass"))
+    dk = q.duct_box
+    W, Hd, Ld = dk["x1"] - dk["x0"], dk["y1"] - dk["y0"], dk["z1"] - dk["z0"]
+    V = W * Hd * Ld - q.tube.Nr * q.tube.Nt * math.pi * q.tube.Do ** 2 / 4 * Ld
+    assert core + byp == pytest.approx(V, abs=1e-3)
+
+
+@needs_cad
+def test_bypass_interfaces_are_conformal():
+    """상·하류 박스가 핀 팩 경계에서 쪼개져 코어·바이패스와 각각 면을 공유해야 함"""
+    q = FTHXParams(fin={"FPI": 14, "t_f": 0.115, "L_fin": 440},
+                   duct={"gap_y": 6, "gap_z": 8})
+    assy, _ = CAD.build(q, CQC.gen_face_split(q, 4))
+    B = {c.name: c.obj for c in assy.children}
+
+    def shared(n1, n2):
+        out = []
+        for f1 in B[n1].Faces():
+            for f2 in B[n2].Faces():
+                c1, c2 = f1.Center(), f2.Center()
+                if abs(f1.Area() - f2.Area()) < 1e-6 and max(
+                        abs(c1.x - c2.x), abs(c1.y - c2.y), abs(c1.z - c2.z)) < 1e-6:
+                    out.append(f1.Area())
+        return out
+
+    for a, b in [("fluid_air_up_core", "fluid_air_core_r01"),
+                 ("fluid_air_up_bypass", "fluid_air_bypass_r01"),
+                 ("fluid_air_core_r01", "fluid_air_bypass_r01"),
+                 ("fluid_air_core_r04", "fluid_air_down_core")]:
+        assert shared(a, b), f"{a} ↔ {b} 공유면 없음"

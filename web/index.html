@@ -317,7 +317,7 @@ const P = {
   // 관
   Do:9.52, Di:8.22, L:500, Nr:4, Nt:12, Pt:25.4, Pl:22.0, layout:"staggered",
   // 핀
-  FPI:14, t_f:0.115, fin_type:"plain", L_fin:500, edge_y:12.7,
+  FPI:14, t_f:0.115, fin_type:"plain", L_fin:500, edge_y:12.7, gap_y:0, gap_z:0,
   // 도메인
   L_up:100, L_down:200, autoExt:true,
   include_bends:true, include_tube_fluid:true, split_core_by_row:true,
@@ -325,12 +325,12 @@ const P = {
   h_base:2.0, n_prism:5,
   // 표시
   finDensity:4, N_d:10,
-  show:{tube:true, fin:true, bend:true, air:true, core:true, ref:true}
+  show:{tube:true, fin:true, bend:true, air:true, core:true, ref:true, byp:true}
 };
 
 const PRESETS = {
-  evap:{Do:9.52,Di:8.22,L:500,L_fin:470,edge_y:12.7,Nr:2,Nt:14,Pt:25.4,Pl:22.0,FPI:10,t_f:0.115,layout:"staggered",fin_type:"louver"},
-  cond:{Do:7.94,Di:7.10,L:600,L_fin:560,edge_y:10.5,Nr:4,Nt:16,Pt:21.0,Pl:18.2,FPI:18,t_f:0.100,layout:"staggered",fin_type:"wavy"}
+  evap:{Do:9.52,Di:8.22,L:500,L_fin:470,edge_y:12.7,gap_y:4,gap_z:5,Nr:2,Nt:14,Pt:25.4,Pl:22.0,FPI:10,t_f:0.115,layout:"staggered",fin_type:"louver"},
+  cond:{Do:7.94,Di:7.10,L:600,L_fin:560,edge_y:10.5,gap_y:3,gap_z:4,Nr:4,Nt:16,Pt:21.0,Pl:18.2,FPI:18,t_f:0.100,layout:"staggered",fin_type:"wavy"}
 };
 
 /* ---------- 형상 배치 ---------- */
@@ -351,6 +351,10 @@ const bbox = () => {
           z0:zc-Lf/2, z1:zc+Lf/2};
 };
 const tubeZ = () => [0, P.L];          // 벤드가 붙는 곳
+/* 공기 도메인 단면 = 핀 팩 + 간극 */
+const duct = () => { const b=bbox(), gy=P.gap_y||0, gz=P.gap_z||0;
+  return {x0:b.x0,x1:b.x1,y0:b.y0-gy,y1:b.y1+gy,z0:b.z0-gz,z1:b.z1+gz,
+          sealed:(gy<=0&&gz<=0)}; };
 
 /* ---------- 검증 ---------- */
 function validate(){
@@ -361,6 +365,7 @@ function validate(){
   if(P.layout==="staggered" && Math.hypot(P.Pl,P.Pt/2)<=P.Do) e.push("대각 피치 ≤ Do — 엇갈림 배열 간섭");
   if((P.L_fin||P.L) > P.L) e.push("L_fin > 관 길이");
   if((P.edge_y||P.Pt/2) <= P.Do/2) e.push("edge_y ≤ Do/2 — 핀이 관을 못 덮음");
+  {const k=duct(); if(k.z0<-1e-9||k.z1>P.L+1e-9) e.push("덕트가 관 길이를 벗어남 — gap_z 축소");}
   const Fp = 25.4/P.FPI;
   if(P.t_f>=Fp) e.push(`t_f ≥ Fp(${Fp.toFixed(3)}) — 핀 겹침`);
   return e;
@@ -381,7 +386,7 @@ function derived(){
   return {Fp, N_fin:Nf, W,H,L, n_tube:n,
     A_front, A_min:A_c, sigma:A_c/A_front, A_o, A_fin_frac:A_fin/A_o,
     D_h:4*A_c*W/A_o, V_zone, gamma:1-V_fin/V_zone, a_v:(A_o/V_zone)*1000,
-    Ao_Ac:A_o/A_c};
+    Ao_Ac:A_o/A_c, ...bypassMetrics(H,L)};
 }
 
 /* ---------- 냉매 도메인 (관내 실형상 해상) ---------- */
@@ -395,6 +400,15 @@ function refDerived(){
           V_str, V_bend, V_tot:V_str+V_bend,
           path:CIRC.rep.path_mean_mm||0, spread:CIRC.rep.path_spread_pct||0, h,
           cells_str:V_str/h**3, cells_bend:V_bend/h**3, cells:(V_str+V_bend)/h**3};
+}
+
+function bypassMetrics(H,L){
+  const k=duct(), Hd=k.y1-k.y0, Ld=k.z1-k.z0, Ad=Hd*Ld, Ab=Ad-H*L;
+  const o={duct_H:Hd, duct_L:Ld, A_duct:Ad, A_bypass:Ab,
+           bypass_frac:Ad>0?Ab/Ad:0, sealed:k.sealed};
+  if((P.gap_y||0)>0) o.Dh_by_y=4*(P.gap_y*L)/(2*(P.gap_y+L));
+  if((P.gap_z||0)>0) o.Dh_by_z=4*(P.gap_z*H)/(2*(P.gap_z+H));
+  return o;
 }
 
 /* ---------- 유동 도메인 자동 산정 ---------- */
@@ -737,7 +751,9 @@ const GROUPS = [
 
  {t:"유동 도메인", sub:"자동 생성", cols:2, f:[
    {k:"L_up",l:"상류 연장",u:"mm",s:10},{k:"L_down",l:"하류 연장",u:"mm",s:10},
-   {k:"autoExt",l:"연장 길이 자동",type:"chk",span:2}]},
+   {k:"autoExt",l:"연장 길이 자동",type:"chk",span:2},
+   {k:"gap_y",l:"덕트 간극 y",u:"mm",s:0.5},{k:"gap_z",l:"덕트 간극 z",u:"mm",s:0.5}],
+  note:"간극이 0 이면 완전 밀폐. 0 보다 크면 핀 팩 바깥에 바이패스 유로가 생기고, 코어와 정확히 맞물리도록 상·하류 박스도 같이 쪼개짐."},
 
  {t:"냉매 도메인", sub:"관내 실형상 해상", cols:2, f:[
    {k:"include_tube_fluid",l:"관내 냉매 체적 생성",type:"chk",span:2},
@@ -795,8 +811,8 @@ function field(f){
 function displayBlock(){
   const w=document.createElement("div");
   const sw={tube:"var(--copper)",fin:"var(--alum)",bend:"var(--copper)",
-            ref:"var(--ref)",air:"var(--air)",core:"var(--air)"};
-  const lb={tube:"관",fin:"핀",bend:"리턴 벤드",ref:"냉매 도메인",air:"공기 도메인",core:"코어 존"};
+            ref:"var(--ref)",air:"var(--air)",core:"var(--air)",byp:"#D8931F"};
+  const lb={tube:"관",fin:"핀",bend:"리턴 벤드",ref:"냉매 도메인",air:"공기 도메인",core:"코어 존",byp:"바이패스"};
   w.innerHTML=`<div class="toggles">${Object.keys(lb).map(k=>
     `<label class="tg" style="--sw:${sw[k]}"><input type="checkbox" data-s="${k}" ${P.show[k]?"checked":""}>${lb[k]}</label>`).join("")}</div>
     <div class="fields one" style="padding-top:0">
@@ -825,7 +841,8 @@ const d2=new THREE.DirectionalLight(0xCFE4F7,.45); d2.position.set(-1.2,-.4,-.9)
 const d3=new THREE.DirectionalLight(0xFFFFFF,.30); d3.position.set(.2,-1,.4); scene.add(d3);
 
 const G={tube:new THREE.Group(),fin:new THREE.Group(),bend:new THREE.Group(),
-         ref:new THREE.Group(),air:new THREE.Group(),core:new THREE.Group()};
+         ref:new THREE.Group(),air:new THREE.Group(),core:new THREE.Group(),
+         byp:new THREE.Group()};
 Object.values(G).forEach(g=>scene.add(g));
 
 const M={
@@ -839,7 +856,9 @@ const M={
   ref:new THREE.MeshStandardMaterial({color:0x7C5CE0,metalness:.15,roughness:.42,
         emissive:0x2A1668,emissiveIntensity:.22}),
   badBend:new THREE.MeshStandardMaterial({color:0xDC5B4C,metalness:.2,roughness:.5,
-        emissive:0x5A100A,emissiveIntensity:.3})
+        emissive:0x5A100A,emissiveIntensity:.3}),
+  byp:new THREE.MeshBasicMaterial({color:0xE8A93A,transparent:true,opacity:.07,depthWrite:false}),
+  edgeByp:new THREE.LineBasicMaterial({color:0xD8931F,transparent:true,opacity:.65})
 };
 
 function clearGroup(g){
@@ -920,11 +939,14 @@ function rebuild(){
 
   // --- 유동 도메인 ---
   if(P.autoExt){ const a=autoExtents(); P.L_up=a.up; P.L_down=a.down; }
-  boxMesh(b.x0-P.L_up,b.x0,b.y0,b.y1,b.z0,b.z1,M.air,M.edgeAir).forEach(o=>G.air.add(o));
-  boxMesh(b.x1,b.x1+P.L_down,b.y0,b.y1,b.z0,b.z1,M.air,M.edgeAir).forEach(o=>G.air.add(o));
+  const K=duct();
+  boxMesh(b.x0-P.L_up,b.x0,K.y0,K.y1,K.z0,K.z1,M.air,M.edgeAir).forEach(o=>G.air.add(o));
+  boxMesh(b.x1,b.x1+P.L_down,K.y0,K.y1,K.z0,K.z1,M.air,M.edgeAir).forEach(o=>G.air.add(o));
   const nSlab=P.split_core_by_row?P.Nr:1, sw=(b.x1-b.x0)/nSlab;
   for(let i=0;i<nSlab;i++)
     boxMesh(b.x0+i*sw,b.x0+(i+1)*sw,b.y0,b.y1,b.z0,b.z1,M.core,M.edgeCore).forEach(o=>G.core.add(o));
+  if(!K.sealed)   // 바이패스 유로 (덕트 간극)
+    boxMesh(b.x0,b.x1,K.y0,K.y1,K.z0,K.z1,M.byp,M.edgeByp).forEach(o=>G.byp.add(o));
 
   applyVis();
   frame(false);
@@ -1155,6 +1177,7 @@ function caseDoc(){
     name:P.name, units:"mm",
     tube:{Do:P.Do,Di:P.Di,L:P.L,Nr:P.Nr,Nt:P.Nt,Pt:P.Pt,Pl:P.Pl,layout:P.layout,k_tube:386},
     fin:{FPI:P.FPI,t_f:P.t_f,fin_type:P.fin_type,k_fin:205,L_fin:P.L_fin,edge_y:P.edge_y},
+    duct:{gap_y:P.gap_y,gap_z:P.gap_z},
     domain:{L_up:P.L_up,L_down:P.L_down,split_core_by_row:P.split_core_by_row,
             include_tube_fluid:P.include_tube_fluid,include_bends:P.include_bends,bend_gap:8},
     derived:{Fp_mm:d.Fp,N_fin:d.N_fin,sigma:d.sigma,porosity_gamma:d.gamma,
