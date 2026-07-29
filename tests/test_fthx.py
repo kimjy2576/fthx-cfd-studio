@@ -412,3 +412,47 @@ def test_auto_offset_resolves_and_is_reported():
     _, m2 = CAD.build(q, cs, DST.PlenumSpec(offset=25, auto_offset=True))
     assert m2["plenum"]["clearance"]["ok"]
     assert m2["plenum"]["offset_mm"] > 25
+
+
+# ─────────────────── 대칭 · 가드 · STEP 옵션 (v0.5.0) ───────────────────
+def test_symmetry_requires_air_side_only():
+    for kw in ({"symmetry": "z", "include_bends": True},
+               {"symmetry": "z", "include_tube_fluid": True}):
+        with pytest.raises(ValueError):
+            FTHXParams(domain=kw)
+    q = FTHXParams(domain={"symmetry": "z", "include_bends": False,
+                           "include_tube_fluid": False})
+    assert q.sym_z == pytest.approx(q.tube.L / 2)
+
+
+@needs_cad
+def test_symmetry_halves_the_model():
+    kw = dict(fin={"FPI": 14, "t_f": 0.115, "L_fin": 440},
+              duct={"gap_y": 6, "gap_z": 8})
+    dom = {"include_bends": False, "include_tube_fluid": False}
+    full, _ = CAD.build(FTHXParams(domain=dom, **kw))
+    half, m = CAD.build(FTHXParams(domain=dict(dom, symmetry="z"), **kw))
+    Vf = sum(c.obj.Volume() for c in full.children)
+    Vh = sum(c.obj.Volume() for c in half.children)
+    assert Vh == pytest.approx(Vf / 2, rel=1e-9)
+    assert m["symmetry"]["plane"] == "z"
+    assert "symmetry_z" in m["face_seeds"]
+    for c in half.children:
+        assert c.obj.BoundingBox().zmin >= m["symmetry"]["z"] - 1e-6
+
+
+@needs_cad
+def test_plenum_guard_without_circuits(p):
+    """벤드가 없으면 관마다 독립 회로가 되어 피더가 폭발함 → 막아야 함"""
+    with pytest.raises(ValueError, match="독립 회로"):
+        CAD.build(p, None, DST.PlenumSpec())
+
+
+@needs_cad
+@pytest.mark.parametrize("ex", [{}, {"precision_mode": 1}, {"write_pcurves": False}])
+def test_step_export_options(ex, tmp_path):
+    import re
+    q = FTHXParams(name="opt", export=ex)
+    m = CAD.export(q, outdir=str(tmp_path), cs=CQC.gen_face_split(q, 4))
+    txt = open(m["_files"]["step"], errors="ignore").read()
+    assert len(re.findall(r"PRODUCT\('([^']+)'", txt)) == 191

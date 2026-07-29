@@ -174,6 +174,11 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
 
     # ---- 입구 플레넘 / 출구 헤더 + 피더 (다중 입출구 처리) ----
     plen_meta = None
+    if plenum is not None and not explicit and not d.include_bends:
+        raise ValueError(
+            f"리턴 벤드가 없어 관 {n_tube}개가 각각 독립 회로가 됨 → 포트 {2*n_tube}개·"
+            f"피더 {2*n_tube}개가 생성됨. 회로(CircuitSet)를 지정하거나 "
+            f"include_bends=True 로 둘 것")
     if plenum is not None:
         clr = DST.check_clearances(p, cs, plenum)
         if plenum.auto_offset and not clr["offset_ok"]:
@@ -225,6 +230,24 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
                         "seed": [cx_, cy_, zc + sgn * sp],
                         "thickness_mm": plenum.jump_thick})
 
+    # ---- z 대칭 반쪽 모델 ----
+    if p.sym_z is not None:
+        zc = p.sym_z
+        big = 1e5
+        keep = cq.Solid.makeBox(2 * big, 2 * big, big,
+                                cq.Vector(-big, -big, zc))      # z >= zc 만 남김
+        for ch in list(assy.children):
+            cut = ch.obj.intersect(keep)
+            if not cut.Solids():
+                assy.children.remove(ch)
+                assy.objects.pop(ch.name, None)
+            else:
+                ch.obj = cut
+        meta_sym = {"plane": "z", "z": zc,
+                    "seed": [(x0 + x1) / 2, (dk["y0"] + dk["y1"]) / 2, zc]}
+    else:
+        meta_sym = None
+
     # ---- 메타데이터 (메시 저널이 좌표로 면을 집게 함) ----
     yc, zc = (dk["y0"] + dk["y1"]) / 2, (dk["z0"] + dk["z1"]) / 2
     meta = {
@@ -235,6 +258,7 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
         "ft_spec_SI": p.to_ft_spec(),
         "core_bbox": {"x": [x0, x1], "y": [y0, y1], "z": [z0, z1]},
         "fin_pack": p.fin_pack,
+        "symmetry": meta_sym,
         "duct_box": dk,
         "tube_z": [tz_lo, tz_hi],
         "face_seeds": {
@@ -257,6 +281,8 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
                            "standoff": rep["standoff"], "summary": rep["summary"]},
         },
     }
+    if meta_sym:
+        meta["face_seeds"]["symmetry_z"] = meta_sym["seed"]
     for prt in rep["ports"]:
         meta["face_seeds"][prt["name"]] = prt["seed"]
     if plen_meta:
@@ -289,7 +315,9 @@ def export(p: FTHXParams, outdir: str = "out", cs=None, plenum=None,
             "jump_sizing": jumps,
             "after": {"maldist_pct": after["maldist_pct"], "rows": after["rows"]}}
     step = out / f"{p.name}.step"
-    assy.export(str(step))
+    ex = p.export
+    assy.export(str(step), exportType="STEP", unit=ex.unit,
+                write_pcurves=ex.write_pcurves, precision_mode=ex.precision_mode)
     (out / f"{p.name}.json").write_text(
         json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
     meta["_files"] = {"step": str(step), "json": str(out / f'{p.name}.json')}

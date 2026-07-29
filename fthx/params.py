@@ -89,12 +89,23 @@ class DuctSpec(BaseModel):
         return self.gap_y <= 0 and self.gap_z <= 0
 
 
+class ExportSpec(BaseModel):
+    """STEP 내보내기 옵션."""
+    unit: Literal["MM", "CM", "M", "INCH"] = "MM"
+    precision_mode: int = Field(0, ge=-1, le=1,
+        description="STEP 정밀도 0=Average, 1=Greatest, -1=Least")
+    write_pcurves: bool = Field(True, description="파라메트릭 커브 기록(임포트 안정성)")
+
+
 class DomainSpec(BaseModel):
     L_up: float = Field(100.0, ge=0, description="상류 연장 [mm]")
     L_down: float = Field(200.0, ge=0, description="하류 연장 [mm]")
     split_core_by_row: bool = Field(True, description="포러스 코어를 열별로 분할")
     include_tube_fluid: bool = Field(True, description="관내 냉매 체적 생성")
     include_bends: bool = Field(False, description="U-bend(리턴벤드) 생성")
+    symmetry: Literal["none", "z"] = Field("none",
+        description="z 중앙면 대칭 반쪽 모델. 공기측 스크리닝 전용 "
+                    "(벤드·관내 냉매가 없어야 성립)")
     bend_gap: float = Field(8.0, ge=0, description="코어 끝면 ~ 벤드 시작 간격 [mm]")
 
 
@@ -104,6 +115,7 @@ class FTHXParams(BaseModel):
     fin: FinSpec = Field(default_factory=FinSpec)
     domain: DomainSpec = Field(default_factory=DomainSpec)
     duct: DuctSpec = Field(default_factory=DuctSpec)
+    export: ExportSpec = Field(default_factory=ExportSpec)
     bend: BendSpec = Field(default_factory=BendSpec)
 
     # ---------- 형상 배치 ----------
@@ -143,6 +155,14 @@ class FTHXParams(BaseModel):
         return (b["x0"], b["x1"], b["y0"], b["y1"], b["z0"], b["z1"])
 
     @property
+    def sym_z(self) -> Optional[float]:
+        """대칭면 z 좌표. symmetry='none' 이면 None."""
+        if self.domain.symmetry != "z":
+            return None
+        b = self.fin_pack
+        return (b["z0"] + b["z1"]) / 2.0
+
+    @property
     def duct_box(self) -> dict:
         """공기 도메인 단면. 핀 팩 + 간극."""
         b, d = self.fin_pack, self.duct
@@ -161,6 +181,16 @@ class FTHXParams(BaseModel):
                              f"(관 0~{self.tube.L})")
         if b["edge_y"] <= self.tube.Do / 2:
             raise ValueError(f"edge_y({b['edge_y']}) ≤ Do/2 — 핀이 관을 못 덮음")
+        if self.domain.symmetry == "z":
+            bad = []
+            if self.domain.include_bends:
+                bad.append("리턴 벤드")
+            if self.domain.include_tube_fluid:
+                bad.append("관내 냉매")
+            if bad:
+                raise ValueError(
+                    "symmetry='z' 는 공기측 스크리닝 전용임 — "
+                    + ", ".join(bad) + " 가 z 대칭이 아님. 해당 옵션을 끄거나 symmetry='none'")
         dk = self.duct_box
         if dk["z0"] < -1e-9 or dk["z1"] > self.tube.L + 1e-9:
             raise ValueError(f"덕트가 관 길이를 벗어남: z {dk['z0']:.1f}~{dk['z1']:.1f} "
