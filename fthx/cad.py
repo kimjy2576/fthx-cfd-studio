@@ -34,16 +34,45 @@ def _cyl(r, x, y, z0, z1):
     return cq.Solid.makeCylinder(r, z1 - z0, cq.Vector(x, y, z0), cq.Vector(0, 0, 1))
 
 
-def _half_torus(R, r, cx, cy, z, th, up: bool):
-    """d 방향과 z 가 만드는 평면 안의 반원 파이프.
-       회전축 n = d x z = (sin th, -cos th, 0) → 링 평면이 d,z 를 포함.
-       위/아래 반쪽은 축정렬 박스와 교집합으로 잘라냄."""
-    n = cq.Vector(math.sin(th), -math.cos(th), 0)
-    tor = cq.Solid.makeTorus(R, r, cq.Vector(cx, cy, z), n)
+def _bend_solid(bd, r: float, up: bool):
+    """리턴 벤드 솔리드 — 다리 + 90°원호 + 직선 + 90°원호 + 다리.
+
+    국소 프레임(u=+X: 두 관을 잇는 방향, v=+Z: 관 축 바깥)에서 축정렬로 만든 뒤
+      (아래쪽 끝단이면 X축 180° 회전) → Z축 θ 회전 → 이동
+    으로 배치함. 모든 불리언이 축정렬이라 안정적임.
+    """
+    S, R, T, St = bd.span, bd.R, bd.straight_total, bd.straight
     pad = R + r + 1.0
-    z0 = z if up else z - pad
-    box = cq.Solid.makeBox(2 * pad, 2 * pad, pad, cq.Vector(cx - pad, cy - pad, z0))
-    return tor.intersect(box)
+    parts = []
+
+    if T > 1e-9:                                   # 직선 다리 2개
+        for u in (-S / 2, S / 2):
+            parts.append(cq.Solid.makeCylinder(r, T, cq.Vector(u, 0, 0),
+                                               cq.Vector(0, 0, 1)))
+    for sign in (-1, 1):                           # 90° 원호 2개
+        uc = sign * (S / 2 - R) if sign > 0 else -(S / 2 - R)
+        tor = cq.Solid.makeTorus(R, r, cq.Vector(uc, 0, T), cq.Vector(0, 1, 0))
+        bx = (cq.Solid.makeBox(pad, 2 * pad, pad, cq.Vector(uc - pad, -pad, T))
+              if sign < 0 else
+              cq.Solid.makeBox(pad, 2 * pad, pad, cq.Vector(uc, -pad, T)))
+        parts.append(tor.intersect(bx))
+    if St > 1e-9:                                  # 두 원호 사이 직선
+        parts.append(cq.Solid.makeCylinder(r, St, cq.Vector(-S / 2 + R, 0, T + R),
+                                           cq.Vector(1, 0, 0)))
+    out = parts[0]
+    for q in parts[1:]:
+        out = out.fuse(q)
+    out = out.clean()
+    if not up:                                     # 아래쪽 끝단
+        out = out.rotate(cq.Vector(0, 0, 0), cq.Vector(1, 0, 0), 180)
+    return out
+
+
+def _place_bend(solid, th_rad: float, cx: float, cy: float, ze: float):
+    """국소 프레임 → θ 회전 → (cx, cy, ze) 이동"""
+    return (solid.rotate(cq.Vector(0, 0, 0), cq.Vector(0, 0, 1),
+                         math.degrees(th_rad))
+                 .translate(cq.Vector(cx, cy, ze)))
 
 
 def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
@@ -133,11 +162,11 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
     xy = {r * t.Nt + i: (x, y) for (r, i, x, y) in centers}
     for bd in bends:
         up = (bd.end == "z1")
-        zs = (tz_hi + bd.standoff) if up else (tz_lo - bd.standoff)
-        tag = f"{bd.circuit}_k{bd.k:02d}"
+        ze = tz_hi if up else tz_lo
         th = math.atan2(xy[bd.b][1] - xy[bd.a][1], xy[bd.b][0] - xy[bd.a][0])
-        o = _half_torus(bd.R, t.Do / 2, *bd.center_xy, zs, th, up)
-        n = _half_torus(bd.R, t.Di / 2, *bd.center_xy, zs, th, up)
+        tag = f"{bd.circuit}_k{bd.k:02d}"
+        o = _place_bend(_bend_solid(bd, t.Do / 2, up), th, *bd.center_xy, ze)
+        n = _place_bend(_bend_solid(bd, t.Di / 2, up), th, *bd.center_xy, ze)
         assy.add(o.cut(n), name=f"solid_bend_{tag}", color=cq.Color(0.8, 0.5, 0.2))
         if d.include_tube_fluid:
             assy.add(n, name=f"fluid_bend_{tag}", color=cq.Color(0.2, 0.4, 0.9))

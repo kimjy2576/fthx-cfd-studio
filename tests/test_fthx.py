@@ -320,3 +320,49 @@ def test_bypass_interfaces_are_conformal():
                  ("fluid_air_core_r01", "fluid_air_bypass_r01"),
                  ("fluid_air_core_r04", "fluid_air_down_core")]:
         assert shared(a, b), f"{a} ↔ {b} 공유면 없음"
+
+
+# ─────────────────────────── 벤드 규격 (v0.5.0) ───────────────────────────
+def test_bend_defaults_to_semicircle(p):
+    b = CQC.derive_bends(p, CQC.gen_face_split(p, 4))[0]
+    assert b.R == pytest.approx(b.span / 2)
+    assert b.straight == pytest.approx(0.0)
+    assert b.path_len == pytest.approx(math.pi * b.span / 2)
+
+
+def test_bend_radius_clamped_to_half_span():
+    """R/D 를 크게 줘도 평면 U 벤드는 span/2 를 넘을 수 없음"""
+    q = FTHXParams(bend={"R_over_D": 1.5, "leg": 6})
+    b = CQC.derive_bends(q, CQC.gen_face_split(q, 4))[0]
+    assert b.R == pytest.approx(b.span / 2)
+    assert b.protrusion == pytest.approx(6 + b.span / 2)
+
+
+@pytest.mark.parametrize("rd,leg", [(1.0, 6.0), (0.7, 4.0)])
+def test_bend_polyline_matches_analytic_path(rd, leg):
+    import numpy as np
+    q = FTHXParams(bend={"R_over_D": rd, "leg": leg})
+    b = CQC.derive_bends(q, CQC.gen_face_split(q, 4))[0]
+    assert b.straight == pytest.approx(b.span - 2 * b.R)
+    P = CQC.bend_polyline(q, b, n_arc=400)
+    L = float(np.linalg.norm(np.diff(P, axis=0), axis=1).sum())
+    assert L == pytest.approx(b.path_len, rel=1e-4)
+    xy = CQC.tube_xy(q)
+    z0, z1 = CQC.z_ends(q)
+    ze = z1 if b.end == "z1" else z0
+    for t, pt in ((b.a, P[0]), (b.b, P[-1])):
+        assert np.linalg.norm(pt - np.array([xy[t][0], xy[t][1], ze])) < 1e-9
+
+
+@needs_cad
+@pytest.mark.parametrize("kw", [{}, {"R_over_D": 1.0, "leg": 6.0}])
+def test_bend_solid_volume_matches_path(kw):
+    q = FTHXParams(bend=kw)
+    cs = CQC.gen_face_split(q, 4)
+    assy, _ = CAD.build(q, cs)
+    bends = CQC.derive_bends(q, cs)
+    CQC.resolve_standoff(q, bends)
+    A = math.pi * q.tube.Di ** 2 / 4
+    cad = sum(c.obj.Volume() for c in assy.children
+              if c.name.startswith("fluid_bend_"))
+    assert cad == pytest.approx(sum(b.path_len * A for b in bends), rel=1e-9)

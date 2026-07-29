@@ -65,6 +65,19 @@ class FinSpec(BaseModel):
         return self
 
 
+class BendSpec(BaseModel):
+    """리턴 벤드 규격. R_over_D 가 None 이면 반원(R = span/2) — 기존 동작."""
+    R_over_D: Optional[float] = Field(None, gt=0,
+        description="벤드 중심선 반경 / 관 외경. 보통 1.0~2.0")
+    leg: float = Field(0.0, ge=0, description="관 끝 ~ 원호 시작 직선 다리 [mm]")
+
+    def radius(self, span: float, Do: float) -> float:
+        """실제 벤드 반경. span/2 를 넘을 수 없음(평면 U 벤드 성립 조건)."""
+        if self.R_over_D is None:
+            return span / 2.0
+        return min(self.R_over_D * Do, span / 2.0)
+
+
 class DuctSpec(BaseModel):
     """코일을 감싸는 덕트/케이싱. 핀 팩과의 간극이 곧 공기 바이패스 유로임.
        gap = 0 이면 완전 밀폐(기존 동작)."""
@@ -91,6 +104,7 @@ class FTHXParams(BaseModel):
     fin: FinSpec = Field(default_factory=FinSpec)
     domain: DomainSpec = Field(default_factory=DomainSpec)
     duct: DuctSpec = Field(default_factory=DuctSpec)
+    bend: BendSpec = Field(default_factory=BendSpec)
 
     # ---------- 형상 배치 ----------
     def tube_centers(self) -> List[Tuple[int, int, float, float]]:

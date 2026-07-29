@@ -62,11 +62,26 @@ class Bend(BaseModel):
     a: int
     b: int
     end: Literal["z0", "z1"]
-    R: float
+    R: float                    # 중심선 반경
     span: float                 # 두 관 중심거리
     center_xy: Tuple[float, float]
-    standoff: float = 0.0
+    leg: float = 0.0            # 직선 다리 (설계 규격)
+    straight: float = 0.0       # 두 원호 사이 직선 = span - 2R
+    standoff: float = 0.0       # 간섭 회피용 추가 직선
     level: int = 0
+
+    @property
+    def straight_total(self) -> float:
+        """관 끝에서 원호 시작까지 = 설계 다리 + 간섭 회피분"""
+        return self.leg + self.standoff
+
+    @property
+    def protrusion(self) -> float:
+        return self.straight_total + self.R
+
+    @property
+    def path_len(self) -> float:
+        return 2.0 * self.straight_total + math.pi * self.R + self.straight
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -162,8 +177,10 @@ def derive_bends(p: FTHXParams, cs: CircuitSet) -> List[Bend]:
             end = ("z1" if odd else "z0") if ck.inlet_end == "z0" else ("z0" if odd else "z1")
             d = xy[b] - xy[a]
             span = float(np.hypot(*d))
-            out.append(Bend(circuit=ck.id, k=k, a=a, b=b, end=end, R=span / 2,
-                            span=span, center_xy=tuple((xy[a] + xy[b]) / 2)))
+            R = p.bend.radius(span, p.tube.Do)
+            out.append(Bend(circuit=ck.id, k=k, a=a, b=b, end=end, R=R,
+                            span=span, center_xy=tuple((xy[a] + xy[b]) / 2),
+                            leg=p.bend.leg, straight=span - 2.0 * R))
     return out
 
 
@@ -227,28 +244,39 @@ def validate_topology(p: FTHXParams, cs: CircuitSet,
 # ══════════════════════════════════════════════════════════════════
 #  검증 2 — 벤드 간섭 · 스탠드오프 배정
 # ══════════════════════════════════════════════════════════════════
-def bend_polyline(p: FTHXParams, bd: Bend, n_arc: int = 33) -> np.ndarray:
-    """직선 스텁 + 반원 호 + 직선 스텁 을 이은 3D 폴리라인"""
+def bend_polyline(p: FTHXParams, bd: Bend, n_arc: int = 17) -> np.ndarray:
+    """벤드 중심선 폴리라인.
+       국소 평면 (u = 두 관을 잇는 방향, v = 관 축 바깥 방향) 에서 그린 뒤 회전·이동.
+         다리 → 90° 원호 → 직선 → 90° 원호 → 다리
+       R = span/2 면 직선이 사라져 반원이 됨.
+    """
     xy, (z0, z1) = tube_xy(p), z_ends(p)
     A, B = xy[bd.a], xy[bd.b]
-    s = 1.0 if bd.end == "z1" else -1.0
-    ze = (z1 if bd.end == "z1" else z0)
-    zs = ze + s * bd.standoff                      # 호가 놓이는 기준면
-    d = B - A
-    th = math.atan2(d[1], d[0])
+    sgn = 1.0 if bd.end == "z1" else -1.0
+    ze = z1 if bd.end == "z1" else z0
+    S, R, T = bd.span, bd.R, bd.straight_total
+    th = math.atan2(B[1] - A[1], B[0] - A[0])
+
+    uv: List[Tuple[float, float]] = []
+    ns = max(2, int(T / 2.0) + 2)
+    for j in range(ns):                                   # 다리 (A쪽)
+        uv.append((-S / 2, T * j / (ns - 1)))
+    for j in range(n_arc):                                # 원호 1 : 180° → 90°
+        a = math.pi * (1.0 - 0.5 * j / (n_arc - 1))
+        uv.append((-S / 2 + R + R * math.cos(a), T + R * math.sin(a)))
+    if bd.straight > 1e-9:                                # 두 원호 사이 직선
+        for j in range(1, 5):
+            uv.append((-S / 2 + R + bd.straight * j / 4.0, T + R))
+    for j in range(n_arc):                                # 원호 2 : 90° → 0°
+        a = math.pi / 2 * (1.0 - j / (n_arc - 1))
+        uv.append((S / 2 - R + R * math.cos(a), T + R * math.sin(a)))
+    for j in range(ns):                                   # 다리 (B쪽)
+        uv.append((S / 2, T * (1.0 - j / (ns - 1))))
+
     ct, st = math.cos(th), math.sin(th)
-    t = np.linspace(math.pi, 0.0, n_arc)           # t=pi → A, t=0 → B
-    lx, ly = bd.R * np.cos(t), bd.R * np.sin(t)    # 링=XY, 끝점 ±X, 볼록 +Y
-    # rotateX(±90°): (x, y, 0) → (x, 0, ±y)      rotateZ(th) 적용
-    gx = bd.center_xy[0] + ct * lx
-    gy = bd.center_xy[1] + st * lx
-    gz = zs + s * ly
-    arc = np.column_stack([gx, gy, gz])
-    ns = max(2, int(abs(zs - ze) / 2.0) + 2)
-    zz = np.linspace(ze, zs, ns)
-    stub_a = np.column_stack([np.full(ns, A[0]), np.full(ns, A[1]), zz])
-    stub_b = np.column_stack([np.full(ns, B[0]), np.full(ns, B[1]), zz[::-1]])
-    return np.vstack([stub_a, arc, stub_b]) if bd.standoff > 0 else arc
+    return np.array([[bd.center_xy[0] + u * ct,
+                      bd.center_xy[1] + u * st,
+                      ze + sgn * v] for u, v in uv])
 
 
 def _min_dist(P: np.ndarray, Q: np.ndarray) -> float:
@@ -298,7 +326,7 @@ def resolve_standoff(p: FTHXParams, bends: List[Bend], clearance: float = 1.0,
             "n_resolved_by_standoff": resolved,
             "n_structural_crossing": len(crossings),
             "crossings": crossings[:12],
-            "max_protrusion_mm": round(max((b.standoff + b.R for b in bends), default=0.0), 1)}
+            "max_protrusion_mm": round(max((b.protrusion for b in bends), default=0.0), 1)}
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -311,7 +339,7 @@ def summarize(p: FTHXParams, cs: CircuitSet, bends: List[Bend]) -> dict:
     rows = []
     for ck in cs.circuits:
         bs = [b for b in bends if b.circuit == ck.id]
-        path = len(ck.tubes) * Ls + sum(math.pi * b.R + 2 * b.standoff for b in bs)
+        path = len(ck.tubes) * Ls + sum(b.path_len for b in bs)
         rows.append({"id": ck.id, "n_tube": len(ck.tubes), "n_bend": len(bs),
                      "path_mm": path, "V_mm3": path * A,
                      "rows_touched": sorted({rc(p, t)[0] for t in ck.tubes})})
