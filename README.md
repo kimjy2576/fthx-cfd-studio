@@ -62,6 +62,18 @@ python run.py
 > python run.py
 > ```
 
+### 업데이트
+
+헤더의 **앱 업데이트** 버튼을 누르면 `git pull --ff-only` 로 최신 코드를 받아옴.
+로컬 수정이 있으면 덮어쓰지 않고 파일 목록을 보여주며 중단함.
+
+파이썬 모듈은 이미 로드된 상태라 코드 변경에는 서버 재시작이 필요함.
+`--reload` 로 띄우면 자동 재시작되고 화면도 자동 새로고침됨.
+
+```powershell
+python run.py --reload
+```
+
 ### Windows — 두 번째부터
 
 ```powershell
@@ -211,6 +223,8 @@ $$\Delta p_{jump} = C_2 \cdot \tfrac{1}{2}\rho v^2 \cdot \Delta m
 |---|---|---|
 | GET | `/` | 스튜디오 |
 | GET | `/api/health` | cadquery·CoolProp 설치 여부 |
+| GET | `/api/version` | 버전 + git 상태 |
+| POST | `/api/update` | `git pull --ff-only` (로컬 수정 있으면 거부) |
 | POST | `/api/circuits/generate` | 패턴 자동 생성 + 검증 |
 | POST | `/api/circuits/validate` | 사용자 회로 검증 |
 | POST | `/api/distribution` | 분배 예측 + jump 계수 |
