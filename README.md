@@ -251,6 +251,9 @@ p.to_ft_spec()
 
 ## 로드맵
 
+전체 개발 계획은 [`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md) 참조.
+
+
 - [x] 형상 파라미터 스키마 + STEP 생성
 - [x] 스튜디오 (3D 미리보기 · STL · case.json)
 - [x] 냉매 도메인
