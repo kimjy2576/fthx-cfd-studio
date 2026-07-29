@@ -1,0 +1,1265 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FT-HX CFD Studio — 3D 해석 전용 형상 설계</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#EDF4FC; --card:#FFFFFF; --tint:#E4EFFB; --sky-l:#DBEDFB;
+  --line:#C9DDF2; --line2:#E4EDF8;
+  --ink:#0F3055; --dim:#5B7EA1; --dimmer:#93ADC7;
+  --blue:#1F7AE0; --blue-d:#1466C4; --blue-l:#3E93EC; --sky:#4FB3EE;
+  --copper:#C8763C; --ref:#7C5CE0; --ref-l:#F0EBFC; --bad:#DC5B4C;
+  --r:13px; --r2:9px; --r3:7px;
+  --sh1:0 1px 2px rgba(15,48,85,.05), 0 2px 8px rgba(15,48,85,.045);
+  --sh2:0 2px 5px rgba(15,48,85,.09), 0 10px 24px rgba(15,48,85,.08);
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+  --sans:"IBM Plex Sans KR","IBM Plex Sans",system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--ink); font-family:var(--sans); font-weight:400;
+  display:flex; flex-direction:column; overflow:hidden; -webkit-font-smoothing:antialiased;
+}
+.num,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ───────── 헤더 ───────── */
+header{
+  flex:0 0 auto; display:flex; align-items:center; gap:14px; padding:11px 18px; flex-wrap:wrap;
+  background:var(--card); border-bottom:1px solid var(--line2);
+  box-shadow:0 1px 3px rgba(15,48,85,.05);
+}
+.brand{display:flex;align-items:baseline;gap:10px}
+.brand b{font-family:var(--mono);font-weight:600;font-size:14px;letter-spacing:.05em;color:var(--blue-d)}
+.brand span{font-size:11.5px;color:var(--dim)}
+.spacer{flex:1}
+.chips{display:flex;gap:7px}
+button{font-family:inherit;color:inherit;cursor:pointer;transition:transform .1s, box-shadow .14s, background .14s, border-color .14s}
+
+/* 볼륨감 있는 버튼 */
+.act,.chip{
+  border-radius:var(--r2); border:1px solid var(--line);
+  background:linear-gradient(180deg,#FFFFFF 0%,#EDF4FC 100%);
+  box-shadow:inset 0 1px 0 #fff, 0 1px 1.5px rgba(15,48,85,.06), 0 2px 6px rgba(15,48,85,.07);
+  font-family:var(--mono); letter-spacing:.04em; color:var(--ink);
+}
+.chip{padding:6px 12px;font-size:11px;color:var(--dim)}
+.act{padding:8px 14px;font-size:11.5px}
+.act:hover:not(:disabled),.chip:hover{transform:translateY(-1px);border-color:var(--blue);color:var(--blue-d);
+  box-shadow:inset 0 1px 0 #fff, 0 2px 3px rgba(15,48,85,.08), 0 6px 14px rgba(31,122,224,.16)}
+.act:active:not(:disabled),.chip:active{transform:translateY(1px);
+  box-shadow:inset 0 2px 4px rgba(15,48,85,.12)}
+.act:disabled{opacity:.42;cursor:not-allowed;box-shadow:none;background:var(--tint)}
+.act.primary{
+  color:#fff; border-color:var(--blue-d);
+  background:linear-gradient(180deg,var(--blue-l) 0%,var(--blue) 55%,var(--blue-d) 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.4), 0 2px 4px rgba(20,102,196,.26), 0 7px 18px rgba(31,122,224,.24);
+}
+.act.primary:hover:not(:disabled){color:#fff;border-color:var(--blue-d);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.45), 0 3px 6px rgba(20,102,196,.3), 0 10px 24px rgba(31,122,224,.3)}
+
+.hfit{display:flex;align-items:center;gap:8px}
+.hfit>span{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--dim);
+  text-transform:uppercase;white-space:nowrap}
+.hseg{width:126px}
+.hseg3{width:180px}
+.seg button:active{background:#fff;transform:translateY(1px);
+  box-shadow:inset 0 2px 3px rgba(15,48,85,.13)}
+.hseg button{padding:6px 0;font-size:10.5px}
+
+/* ───────── 본문 ───────── */
+main{flex:1;display:flex;min-height:0}
+.rail{flex:0 0 328px;overflow-y:auto;overflow-x:hidden;padding:11px 11px 18px}
+.rail::-webkit-scrollbar{width:10px}
+.rail::-webkit-scrollbar-track{background:transparent}
+.rail::-webkit-scrollbar-thumb{background:#C4D9EF;border-radius:5px;border:3px solid var(--bg)}
+
+.grp{background:var(--card);border:1px solid var(--line2);border-radius:var(--r);
+     box-shadow:var(--sh1);margin-bottom:11px;overflow:hidden}
+.grp>h3{display:flex;align-items:center;gap:9px;padding:12px 15px 10px;
+  font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--blue-d)}
+.grp>h3 i{flex:1;height:1px;background:var(--line2);font-style:normal}
+.grp>h3 em{font-style:normal;font-size:9px;color:var(--dimmer);letter-spacing:.08em;text-transform:none}
+.fields{padding:0 15px 14px;display:grid;grid-template-columns:1fr 1fr;gap:9px 11px}
+.fields.one{grid-template-columns:1fr}
+.f{display:flex;flex-direction:column;gap:5px;min-width:0}
+.f label{font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;color:var(--dim);
+  text-transform:uppercase;display:flex;justify-content:space-between;gap:6px}
+.f label em{font-style:normal;color:var(--dimmer);text-transform:none;letter-spacing:0}
+.f input,.f select{
+  background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:var(--r2);
+  padding:7px 9px;font-family:var(--mono);font-size:12.5px;width:100%;
+  font-variant-numeric:tabular-nums;
+  box-shadow:inset 0 1px 2px rgba(15,48,85,.055);transition:.13s}
+.f select{cursor:pointer}
+.f input:focus,.f select:focus{outline:none;border-color:var(--blue);
+  box-shadow:inset 0 1px 2px rgba(15,48,85,.04), 0 0 0 3px rgba(31,122,224,.15)}
+.f input:hover,.f select:hover{border-color:#A8C8E8}
+
+.seg{display:flex;gap:3px;padding:3px;border:1px solid var(--line);border-radius:var(--r2);
+     background:var(--tint);box-shadow:inset 0 1px 2px rgba(15,48,85,.06)}
+.seg button{flex:1;background:transparent;border:1px solid transparent;border-radius:var(--r3);
+  padding:5px 0;font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;color:var(--dim)}
+.seg button[aria-pressed="true"]{background:#fff;color:var(--blue-d);border-color:var(--line);
+  box-shadow:0 1px 2px rgba(15,48,85,.09)}
+
+.note{margin:0 15px 14px;padding:10px 12px;background:var(--sky-l);border-radius:var(--r2);
+      font-size:11.5px;color:#2E5A85;line-height:1.6}
+.err{margin:0 0 10px;padding:11px 14px;font-size:11.5px;color:#fff;line-height:1.6;
+     font-family:var(--mono);background:linear-gradient(180deg,#E4705F,var(--bad));
+     border-radius:var(--r);box-shadow:var(--sh1)}
+.err:empty{display:none}
+
+.toggles{padding:0 15px 12px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tg{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;
+    letter-spacing:.03em;color:var(--dim);cursor:pointer;user-select:none}
+.tg input{appearance:none;width:15px;height:15px;border:1px solid var(--line);border-radius:5px;
+  background:#fff;cursor:pointer;flex:0 0 auto;position:relative;
+  box-shadow:inset 0 1px 2px rgba(15,48,85,.07);transition:.13s}
+.tg input:checked{background:var(--sw,var(--blue));border-color:var(--sw,var(--blue));
+  box-shadow:0 1px 3px rgba(31,122,224,.35)}
+.tg input:checked::after{content:"";position:absolute;left:4.5px;top:1.5px;width:3.5px;height:7.5px;
+  border:solid #fff;border-width:0 2px 2px 0;transform:rotate(42deg)}
+
+/* ───────── 스테이지 ───────── */
+.stage{flex:1;position:relative;min-width:0;display:flex;flex-direction:column;padding:11px 11px 11px 0;gap:11px}
+.view{flex:1;position:relative;min-height:0;border-radius:var(--r);overflow:hidden;
+  border:1px solid var(--line2);box-shadow:var(--sh1);
+  background:
+    repeating-linear-gradient(0deg,transparent 0 31px,rgba(31,122,224,.055) 31px 32px),
+    repeating-linear-gradient(90deg,transparent 0 31px,rgba(31,122,224,.055) 31px 32px),
+    radial-gradient(130% 105% at 50% 0%,#FFFFFF 0%,#EAF3FC 62%,#DDEBF9 100%);
+}
+canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%}
+.hud{position:absolute;pointer-events:none;background:rgba(255,255,255,.82);
+  backdrop-filter:blur(7px);border:1px solid var(--line2);border-radius:var(--r2);
+  padding:8px 11px;box-shadow:var(--sh1);
+  font-family:var(--mono);font-size:10px;letter-spacing:.07em;color:var(--dim);line-height:1.85}
+.hud.tl{top:13px;left:13px;letter-spacing:.05em}
+.hud.tr{top:13px;right:13px;text-align:right}
+.hud.bl{bottom:13px;left:13px}
+.hud b{color:var(--blue-d);font-weight:600}
+.axis{position:absolute;right:16px;bottom:16px;width:78px;height:78px;pointer-events:none;
+  background:rgba(255,255,255,.82);backdrop-filter:blur(7px);border:1px solid var(--line2);
+  border-radius:var(--r2);box-shadow:var(--sh1)}
+
+/* ───────── 존 스트립 ───────── */
+.strip{flex:0 0 auto;background:var(--card);border:1px solid var(--line2);
+       border-radius:var(--r);box-shadow:var(--sh1);padding:11px 15px 13px}
+.strip .head{display:flex;align-items:baseline;gap:12px;margin-bottom:9px;flex-wrap:wrap}
+.strip .head b{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--blue-d)}
+.strip .head span{font-size:11px;color:var(--dim);font-family:var(--mono)}
+.bar{display:flex;height:38px;border:1px solid var(--line);border-radius:var(--r2);overflow:hidden;
+     box-shadow:inset 0 1px 3px rgba(15,48,85,.07)}
+.zone{position:relative;display:flex;flex-direction:column;justify-content:center;align-items:center;
+  gap:1px;border-right:1px solid rgba(255,255,255,.85);min-width:0;overflow:hidden;
+  transition:flex-grow .3s cubic-bezier(.4,0,.2,1)}
+.zone:last-child{border-right:0}
+.zone .zn{font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--ink);
+  white-space:nowrap;text-overflow:ellipsis;overflow:hidden;max-width:94%}
+.zone .zv{font-family:var(--mono);font-size:8.5px;color:var(--dim);white-space:nowrap}
+.zone.up{background:linear-gradient(180deg,#DCEEFB,#C9E4F8)}
+.zone.down{background:linear-gradient(180deg,#EAF4FC,#DCEBF7)}
+.zone.ref{background:linear-gradient(180deg,#EFEAFC,#DFD5F8)}
+.zone.bend{background:
+  repeating-linear-gradient(-45deg,rgba(124,92,224,.24) 0 4px,transparent 4px 9px),
+  linear-gradient(180deg,#E7E0FA,#D6C9F5)}
+.refhead{margin-top:11px}
+.refbar{height:30px}
+.refoff{display:none}
+.zone.core{background:
+  repeating-linear-gradient(45deg,rgba(31,122,224,.20) 0 4px,transparent 4px 9px),
+  linear-gradient(180deg,#FFF4EA,#FBE6D4)}
+.ruler{display:flex;margin-top:5px;font-family:var(--mono);font-size:8.5px;color:var(--dimmer)}
+.ruler span{flex:1;border-left:1px solid var(--line);padding-left:4px}
+.ruler span:last-child{text-align:right;border-right:1px solid var(--line);padding-right:4px}
+
+/* ───────── 회로 설계 모달 ───────── */
+.modal{position:fixed;inset:0;background:rgba(10,35,60,.42);backdrop-filter:blur(3px);
+  display:flex;align-items:center;justify-content:center;z-index:50;padding:22px}
+.modal[hidden]{display:none}
+.mcard{background:var(--card);border-radius:16px;box-shadow:0 18px 60px rgba(15,48,85,.30);
+  width:min(1200px,100%);height:min(760px,100%);display:flex;flex-direction:column;overflow:hidden}
+.mhead{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line2)}
+.mhead>b{font-family:var(--mono);font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--blue-d)}
+.mhead>span{flex:1;font-size:11.5px;color:var(--dim);font-family:var(--mono)}
+.mbody{display:flex;min-height:0;flex:1}
+.mmap{flex:1;min-width:0;padding:10px;display:flex;align-items:center;justify-content:center;
+  background:repeating-linear-gradient(0deg,transparent 0 23px,rgba(31,122,224,.05) 23px 24px),
+             repeating-linear-gradient(90deg,transparent 0 23px,rgba(31,122,224,.05) 23px 24px),#FBFDFF}
+.mside{flex:0 0 302px;border-left:1px solid var(--line2);padding:12px;overflow-y:auto;
+  display:flex;flex-direction:column;gap:9px}
+.lbl2{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--blue-d);border-bottom:1px solid var(--line2);padding-bottom:4px}
+.cegen{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.cegen .act{padding:6px 4px;font-size:10px}
+.cetube{cursor:pointer}
+.cenum{font-family:var(--mono);font-size:9px;text-anchor:middle;pointer-events:none;font-weight:500}
+.ceax{font-family:var(--mono);font-size:9px;fill:var(--dimmer);letter-spacing:.08em}
+.ceio{font-family:var(--mono);font-size:8.5px;letter-spacing:.06em}
+.cerow{display:flex;align-items:center;gap:7px;padding:5px 7px;border:1px solid var(--line2);
+  border-radius:8px;font-size:11px;cursor:pointer;background:#fff}
+.cerow.on{border-color:var(--blue);box-shadow:0 0 0 2px rgba(31,122,224,.13)}
+.cerow i{width:10px;height:10px;border-radius:3px;flex:0 0 auto}
+.cerow b{font-family:var(--mono);font-size:10.5px}
+.cerow>span{color:var(--dim);font-size:10px}
+.cerow>span.num{margin-left:auto}
+.cerow button{border:1px solid var(--line);background:#fff;border-radius:6px;padding:1px 5px;
+  font-family:var(--mono);font-size:9.5px;color:var(--dim);cursor:pointer}
+.cerow button:hover{border-color:var(--blue);color:var(--blue-d)}
+.cewarn{padding:9px 11px;border-radius:9px;font-family:var(--mono);font-size:10.5px;line-height:1.65}
+.cewarn.ok{background:var(--sky-l);color:#2E5A85}
+.cewarn.bad{background:#FDECEA;color:#9E2B1E}
+
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+@media (max-width:960px){
+  main{flex-direction:column}
+  .rail{flex:0 0 46vh;width:100%}
+  .stage{padding:0 11px 11px}
+}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><b>FT-HX CFD STUDIO</b><span>3D 해석 전용 형상 설계</span></div>
+  <div class="chips">
+    <button class="chip" data-preset="evap">증발기 프리셋</button>
+    <button class="chip" data-preset="cond">응축기 프리셋</button>
+  </div>
+  <div class="spacer"></div>
+  <button class="act" id="btnCirc">회로 설계</button>
+  <div class="hfit"><span>뷰 맞춤</span>
+    <div class="seg hseg" id="fitSeg">
+      <button data-fit="core" aria-pressed="true">코어</button>
+      <button data-fit="all" aria-pressed="false">전체</button>
+    </div></div>
+  <div class="hfit"><span>STL</span>
+    <div class="seg hseg3" id="stlSeg">
+      <button id="btnStlSolid">고체</button>
+      <button id="btnStlAir">공기</button>
+      <button id="btnStlRef">냉매</button>
+    </div></div>
+  <button class="act" id="btnStep" title="로컬 서버로 STEP 생성" disabled>STEP (서버)</button>
+  <button class="act primary" id="btnJson">case.json</button>
+</header>
+
+<main>
+  <aside class="rail" id="rail"></aside>
+
+  <section class="stage">
+    <div class="view" id="view">
+      <canvas id="cv"></canvas>
+      <div class="hud tl">드래그 회전 · 휠 확대 · Shift+드래그 이동</div>
+      <div class="hud tr" id="hudR"></div>
+      <div class="hud bl" id="hudL"></div>
+      <svg class="axis" viewBox="0 0 78 78" id="axis"></svg>
+    </div>
+
+    <div class="strip">
+      <div class="head">
+        <b>유동 도메인 존 구성</b>
+        <span id="zoneSummary"></span>
+      </div>
+      <div class="bar" id="zoneBar"></div>
+      <div class="ruler" id="zoneRuler"></div>
+      <div class="head refhead" id="refHead">
+        <b>냉매 도메인</b><span id="refSummary"></span>
+      </div>
+      <div class="bar refbar" id="refBar"></div>
+    </div>
+  </section>
+</main>
+
+<div class="modal" id="ceModal" hidden>
+ <div class="mcard">
+  <div class="mhead"><b>회로 설계</b><span id="ceStat"></span>
+    <button class="act" id="ceClose">닫기</button></div>
+  <div class="mbody">
+   <div class="mmap"><svg id="ceSvg"></svg></div>
+   <div class="mside">
+    <div class="lbl2">자동 생성</div>
+    <div class="cegen">
+      <button class="act" data-gen="single">단일 회로</button>
+      <button class="act" data-gen="row_serpentine">열별 사행</button>
+      <button class="act" data-gen="face_split">전면 N분할</button>
+      <button class="act" data-gen="interlaced">인터레이스드 N</button>
+    </div>
+    <div class="f"><label>회로 수 N<em>분할·인터레이스드</em></label>
+      <input type="number" id="ceN" min="1" step="1" value="4"></div>
+    <div class="lbl2">회로 <span style="float:right;text-transform:none;letter-spacing:0;
+      color:var(--dimmer)">관 클릭·드래그로 경로 지정</span></div>
+    <div id="ceList" style="display:flex;flex-direction:column;gap:5px"></div>
+    <button class="act" id="ceAdd">+ 회로 추가</button>
+    <div class="lbl2">검증</div>
+    <div class="cewarn ok" id="ceWarn"></div>
+   </div>
+  </div>
+ </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+
+/* =========================================================================
+   1. 파라미터 모델 —  fthx_params.py (FTHXParams) 와 동일 스키마
+   ========================================================================= */
+const P = {
+  name:"fthx_case",
+  // 관
+  Do:9.52, Di:8.22, L:500, Nr:4, Nt:12, Pt:25.4, Pl:22.0, layout:"staggered",
+  // 핀
+  FPI:14, t_f:0.115, fin_type:"plain",
+  // 도메인
+  L_up:100, L_down:200, autoExt:true,
+  include_bends:true, include_tube_fluid:true, split_core_by_row:true,
+  // 메시 추정
+  h_base:2.0, n_prism:5,
+  // 표시
+  finDensity:4, N_d:10,
+  show:{tube:true, fin:true, bend:true, air:true, core:true, ref:true}
+};
+
+const PRESETS = {
+  evap:{Do:9.52,Di:8.22,L:500,Nr:2,Nt:14,Pt:25.4,Pl:22.0,FPI:10,t_f:0.115,layout:"staggered",fin_type:"louver"},
+  cond:{Do:7.94,Di:7.10,L:600,Nr:4,Nt:16,Pt:21.0,Pl:18.2,FPI:18,t_f:0.100,layout:"staggered",fin_type:"wavy"}
+};
+
+/* ---------- 형상 배치 ---------- */
+const centers = () => {
+  const out=[];
+  for(let r=0;r<P.Nr;r++){
+    const x = P.Pl/2 + r*P.Pl;
+    const off = (P.layout==="staggered" && r%2===1) ? P.Pt/2 : 0;
+    for(let i=0;i<P.Nt;i++) out.push({r,i,x,y:P.Pt/2 + i*P.Pt + off});
+  }
+  return out;
+};
+const bbox = () => {
+  const ys = centers().map(c=>c.y);
+  return {x0:0, x1:P.Nr*P.Pl, y0:Math.min(...ys)-P.Pt/2, y1:Math.max(...ys)+P.Pt/2, z0:0, z1:P.L};
+};
+
+/* ---------- 검증 ---------- */
+function validate(){
+  const e=[];
+  if(P.Di>=P.Do) e.push("Di ≥ Do — 관 두께 없음");
+  if(P.Pt<=P.Do) e.push("Pt ≤ Do — 횡방향 간섭");
+  if(P.Pl<=P.Do) e.push("Pl ≤ Do — 종방향 간섭");
+  if(P.layout==="staggered" && Math.hypot(P.Pl,P.Pt/2)<=P.Do) e.push("대각 피치 ≤ Do — 엇갈림 배열 간섭");
+  const Fp = 25.4/P.FPI;
+  if(P.t_f>=Fp) e.push(`t_f ≥ Fp(${Fp.toFixed(3)}) — 핀 겹침`);
+  return e;
+}
+
+/* ---------- 파생량 (Wang 정의, fthx_params.derived() 와 동일) ---------- */
+function derived(){
+  const b=bbox(), Fp=25.4/P.FPI;
+  const W=b.x1-b.x0, H=b.y1-b.y0, L=b.z1-b.z0;
+  const n=P.Nr*P.Nt, Nf=Math.floor(L/Fp);
+  const A_front=H*L;
+  const A_c=(H-P.Nt*P.Do)*(L-Nf*P.t_f);
+  const A_tube=n*Math.PI*P.Do*(L-Nf*P.t_f);
+  const A_fin=2*Nf*(W*H - n*Math.PI*P.Do**2/4);
+  const A_o=A_tube+A_fin;
+  const V_box=W*H*L, V_tube=n*Math.PI*P.Do**2/4*L, V_zone=V_box-V_tube;
+  const V_fin=Nf*P.t_f*(W*H - n*Math.PI*P.Do**2/4);
+  return {Fp, N_fin:Nf, W,H,L, n_tube:n,
+    A_front, A_min:A_c, sigma:A_c/A_front, A_o, A_fin_frac:A_fin/A_o,
+    D_h:4*A_c*W/A_o, V_zone, gamma:1-V_fin/V_zone, a_v:(A_o/V_zone)*1000,
+    Ao_Ac:A_o/A_c};
+}
+
+/* ---------- 냉매 도메인 (관내 실형상 해상) ---------- */
+function refDerived(){
+  const A=Math.PI*P.Di*P.Di/4, B0=bbox(), Ls=B0.z1-B0.z0;
+  const nStr=nTube(), bends=CIRC.bends;
+  const V_str=nStr*Ls*A;
+  const V_bend=bends.reduce((s,b)=>s+(Math.PI*b.R+2*b.standoff)*A,0);
+  const h=P.Di/Math.max(4,P.N_d);
+  return {A, Ls, nCirc:CIRC.list.length, nStr, nBend:bends.length,
+          V_str, V_bend, V_tot:V_str+V_bend,
+          path:CIRC.rep.path_mean_mm||0, spread:CIRC.rep.path_spread_pct||0, h,
+          cells_str:V_str/h**3, cells_bend:V_bend/h**3, cells:(V_str+V_bend)/h**3};
+}
+
+/* ---------- 유동 도메인 자동 산정 ---------- */
+function autoExtents(){
+  const b=bbox(), W=b.x1-b.x0;
+  return {up:Math.max(60, Math.round(1.5*W)), down:Math.max(150, Math.round(5*W))};
+}
+function zones(){
+  const b=bbox(), d=derived(), H=d.H, L=d.L, h=Math.max(.2,P.h_base);
+  const cell = (dx)=> Math.round(dx*H*L/(h**3));
+  const z=[{k:"up", name:"fluid_air_up", dx:P.L_up}];
+  if(P.split_core_by_row) for(let r=0;r<P.Nr;r++)
+      z.push({k:"core", name:`fluid_air_core_r${String(r+1).padStart(2,"0")}`, dx:P.Pl});
+  else z.push({k:"core", name:"fluid_air_core", dx:b.x1-b.x0});
+  z.push({k:"down", name:"fluid_air_down", dx:P.L_down});
+  z.forEach(o=>{ o.cells = cell(o.dx) * (o.k==="core" ? d.gamma : 1); });
+  const A_wall = d.n_tube*Math.PI*P.Do*L;
+  const prism = Math.round(A_wall/(h*h))*P.n_prism;
+  return {list:z, prism, total:z.reduce((s,o)=>s+o.cells,0)+prism};
+}
+
+/* =========================================================================
+   회로 설계 엔진 — circuits.py 이식 (스키마 · 생성기 · 위상/간섭 검증)
+   ========================================================================= */
+const PALETTE=["#1F7AE0","#E0663F","#2FA36B","#7C5CE0","#D89A2B",
+               "#0FA3B1","#C4457E","#6B8F1E","#8A5A2B","#4B5EAA",
+               "#B0413E","#2B8C6A"];
+const CIRC={pattern:"row_serpentine", nc:4, list:[], bends:[], ports:[],
+            rep:{warnings:[],standoff:{},summary:{}}, active:0};
+
+const nTube = ()=>P.Nr*P.Nt;
+const tidOf = (r,i)=>r*P.Nt+i;
+const rcOf  = t=>[Math.floor(t/P.Nt), t%P.Nt];
+const cColor= idx=>PALETTE[idx%PALETTE.length];
+function XY(){ const a=new Array(nTube());
+  centers().forEach(c=>a[tidOf(c.r,c.i)]={x:c.x,y:c.y}); return a; }
+
+/* ---------- 자동 생성기 ---------- */
+const bou=(a,f)=>f?a.slice().reverse():a.slice();
+const mkC=(n,tubes)=>({id:"c"+String(n).padStart(2,"0"),tubes,inlet_end:"z0",m_frac:null});
+function rangeArr(a,b){const o=[];for(let i=a;i<b;i++)o.push(i);return o;}
+
+function genSingle(){
+  let t=[]; for(let j=0,r=P.Nr-1;r>=0;r--,j++) t=t.concat(bou(rangeArr(0,P.Nt),j%2===1).map(i=>tidOf(r,i)));
+  return [mkC(1,t)];
+}
+function genRowSerp(){
+  return rangeArr(0,P.Nr).map(r=>mkC(r+1, rangeArr(0,P.Nt).map(i=>tidOf(r,i))));
+}
+function genFaceSplit(n){
+  n=Math.max(1,Math.min(n,P.Nt)); const out=[];
+  const e=rangeArr(0,n+1).map(c=>Math.round(P.Nt*c/n));
+  for(let c=0;c<n;c++){
+    const band=rangeArr(e[c],e[c+1]); let t=[];
+    for(let j=0,r=P.Nr-1;r>=0;r--,j++) t=t.concat(bou(band,j%2===1).map(i=>tidOf(r,i)));
+    out.push(mkC(c+1,t));
+  }
+  return out;
+}
+function genInterlaced(n){
+  n=Math.max(1,Math.min(n,P.Nt)); const out=[];
+  for(let c=0;c<n;c++){
+    const band=[]; for(let i=c;i<P.Nt;i+=n) band.push(i);
+    let t=[]; for(let j=0,r=P.Nr-1;r>=0;r--,j++) t=t.concat(bou(band,j%2===1).map(i=>tidOf(r,i)));
+    out.push(mkC(c+1,t));
+  }
+  return out;
+}
+function genNone(){ return rangeArr(0,nTube()).map(t=>mkC(t+1,[t])); }
+
+const GENS={single:genSingle,row_serpentine:genRowSerp,none:genNone,
+            face_split:()=>genFaceSplit(CIRC.nc),interlaced:()=>genInterlaced(CIRC.nc)};
+
+function regenCircuits(){
+  CIRC.list = (GENS[CIRC.pattern]||genRowSerp)();
+  CIRC.active=0; analyzeCircuits();
+}
+/* 관 수가 바뀌면 커스텀 회로는 유지 불가 → 안전하게 재생성 */
+function reconcileCircuits(){
+  const N=nTube();
+  const bad = CIRC.list.length===0 ||
+              CIRC.list.some(c=>c.tubes.some(t=>t>=N));
+  if(CIRC.pattern!=="custom" || bad) regenCircuits(); else analyzeCircuits();
+}
+
+/* ---------- 벤드 도출 ---------- */
+function deriveBends(){
+  if(!P.include_bends) return [];
+  const xy=XY(), out=[];
+  CIRC.list.forEach(ck=>{
+    for(let k=1;k<ck.tubes.length;k++){
+      const a=ck.tubes[k-1], b=ck.tubes[k];
+      if(xy[a]===undefined||xy[b]===undefined) continue;
+      const odd=(k%2===1);
+      const end = ck.inlet_end==="z0" ? (odd?"z1":"z0") : (odd?"z0":"z1");
+      const dx=xy[b].x-xy[a].x, dy=xy[b].y-xy[a].y, span=Math.hypot(dx,dy);
+      out.push({c:ck.id,k,a,b,end,R:span/2,span,th:Math.atan2(dy,dx),
+                cx:(xy[a].x+xy[b].x)/2, cy:(xy[a].y+xy[b].y)/2,
+                standoff:0, level:0, bad:false});
+    }
+  });
+  return out;
+}
+/* 스텁 + 반원 호 + 스텁 폴리라인 (flat [x,y,z,...]) */
+function bendPoly(bd,nArc){
+  nArc=nArc||25; const xy=XY(), B0=bbox(), A=xy[bd.a], Bp=xy[bd.b];
+  const s=bd.end==="z1"?1:-1, ze=bd.end==="z1"?B0.z1:B0.z0, zs=ze+s*bd.standoff;
+  const ct=Math.cos(bd.th), st=Math.sin(bd.th), p=[];
+  const ns=bd.standoff>0?Math.max(2,Math.ceil(bd.standoff/3)):0;
+  for(let j=0;j<ns;j++){const z=ze+(zs-ze)*j/(ns-1); p.push(A.x,A.y,z);}
+  for(let j=0;j<nArc;j++){
+    const t=Math.PI*(1-j/(nArc-1)), c=Math.cos(t);
+    p.push(bd.cx+ct*bd.R*c, bd.cy+st*bd.R*c, zs+s*bd.R*Math.sin(t));
+  }
+  for(let j=0;j<ns;j++){const z=zs+(ze-zs)*j/(ns-1); p.push(Bp.x,Bp.y,z);}
+  return p;
+}
+function minDist3(p,q){
+  let m=Infinity;
+  for(let i=0;i<p.length;i+=3) for(let j=0;j<q.length;j+=3){
+    const dx=p[i]-q[j], dy=p[i+1]-q[j+1], dz=p[i+2]-q[j+2];
+    const d=dx*dx+dy*dy+dz*dz; if(d<m) m=d;
+  }
+  return Math.sqrt(m);
+}
+/* 2D 현(chord) 간 최소거리 — 값싼 사전 배제용 */
+function segDist2(a1,a2,b1,b2){
+  const f=(p,q,r)=>{ const vx=r.x-q.x, vy=r.y-q.y, L=vx*vx+vy*vy;
+    let t=L?((p.x-q.x)*vx+(p.y-q.y)*vy)/L:0; t=Math.max(0,Math.min(1,t));
+    return Math.hypot(p.x-(q.x+t*vx), p.y-(q.y+t*vy)); };
+  return Math.min(f(a1,b1,b2),f(a2,b1,b2),f(b1,a1,a2),f(b2,a1,a2));
+}
+
+/* ---------- 간섭 · 스탠드오프 ---------- */
+function resolveStandoff(bends){
+  const step=P.Do*1.6, maxSo=3*P.Pt, nLv=Math.max(1,Math.floor(maxSo/step));
+  const thr=P.Do+1.0, xy=XY(), placed={z0:[],z1:[]};
+  const cross=[]; let resolved=0;
+  const near=(bd,o)=>segDist2(xy[bd.a],xy[bd.b],xy[o.a],xy[o.b]) < bd.R+o.R+thr;
+
+  bends.slice().sort((u,v)=>v.R-u.R).forEach(bd=>{
+    bd.bad=false; let hit=[];
+    for(let lv=0; lv<=nLv; lv++){
+      bd.level=lv; bd.standoff=lv*step;
+      const poly=bendPoly(bd);
+      hit=placed[bd.end].filter(o=>near(bd,o.bd)&&minDist3(poly,o.poly)<thr)
+                        .map(o=>o.bd.c+"#"+o.bd.k);
+      if(!hit.length){ if(lv>0) resolved++;
+        placed[bd.end].push({bd,poly}); return; }
+    }
+    bd.level=0; bd.standoff=0; bd.bad=true;
+    cross.push({bend:bd.c+"#"+bd.k, end:bd.end, span:+bd.span.toFixed(1), with:hit});
+    placed[bd.end].push({bd,poly:bendPoly(bd)});
+  });
+  return {step_mm:+step.toFixed(2), max_standoff_mm:+maxSo.toFixed(1),
+          max_level:bends.reduce((m,b)=>Math.max(m,b.level),0),
+          n_resolved:resolved, n_crossing:cross.length, crossings:cross.slice(0,10),
+          max_protrusion_mm:+bends.reduce((m,b)=>Math.max(m,b.standoff+b.R),0).toFixed(1)};
+}
+
+/* ---------- 위상 검증 ---------- */
+function validateCircuits(bends){
+  const N=nTube(), seen={}, msgs=[];
+  CIRC.list.forEach(ck=>{
+    if(new Set(ck.tubes).size!==ck.tubes.length) msgs.push(`${ck.id}: 같은 관을 두 번 지나감`);
+    ck.tubes.forEach(t=>{
+      if(t<0||t>=N) msgs.push(`${ck.id}: 관 id ${t} 범위 밖`);
+      else if(seen[t]!==undefined) msgs.push(`관 ${JSON.stringify(rcOf(t))} 이 ${seen[t]}·${ck.id} 에 중복`);
+      else seen[t]=ck.id;
+    });
+  });
+  const miss=[]; for(let t=0;t<N;t++) if(seen[t]===undefined) miss.push(t);
+  if(miss.length) msgs.push(`미배정 관 ${miss.length}개`);
+  const lim=2.5*Math.max(P.Pt,P.Pl);
+  bends.forEach(b=>{
+    if(b.span>lim) msgs.push(`${b.c}#${b.k} span ${b.span.toFixed(1)}mm > 한계 ${lim.toFixed(1)}mm`);
+    if(b.span<P.Do) msgs.push(`${b.c}#${b.k} span ${b.span.toFixed(1)}mm < Do — 형상 불가`);
+  });
+  return {msgs, miss};
+}
+
+/* ---------- 입출구 포트 ---------- */
+function ioPorts(){
+  const xy=XY(), B0=bbox(), out=[];
+  CIRC.list.forEach(ck=>{
+    const n=ck.tubes.length, ie=ck.inlet_end;
+    const oe = ((n-1)%2===0) ? ie : (ie==="z0"?"z1":"z0");
+    [["inlet",ck.tubes[0],ie],["outlet",ck.tubes[n-1],oe]].forEach(([kind,t,e])=>{
+      if(xy[t]) out.push({name:`ref_${kind}_${ck.id}`, circuit:ck.id, kind, tube:t,
+        rc:rcOf(t), end:e, seed:[xy[t].x, xy[t].y, e==="z0"?B0.z0:B0.z1]});
+    });
+  });
+  return out;
+}
+
+/* ---------- 통합 ---------- */
+function analyzeCircuits(){
+  const bends=deriveBends();
+  const so=resolveStandoff(bends);
+  const v=validateCircuits(bends);
+  const B0=bbox(), Ls=B0.z1-B0.z0, A=Math.PI*P.Di*P.Di/4;
+  const rows=CIRC.list.map((ck,idx)=>{
+    const bs=bends.filter(b=>b.c===ck.id);
+    const path=ck.tubes.length*Ls + bs.reduce((s,b)=>s+Math.PI*b.R+2*b.standoff,0);
+    return {id:ck.id, color:cColor(idx), n_tube:ck.tubes.length, n_bend:bs.length,
+            path_mm:path, V_mm3:path*A,
+            rows_touched:[...new Set(ck.tubes.map(t=>rcOf(t)[0]))].sort()};
+  });
+  const L=rows.map(r=>r.path_mm), mean=L.reduce((a,b)=>a+b,0)/(L.length||1);
+  CIRC.bends=bends; CIRC.ports=ioPorts();
+  CIRC.rep={warnings:v.msgs, missing:v.miss, standoff:so, circuits:rows,
+    path_mean_mm:mean, path_spread_pct:L.length?(Math.max(...L)-Math.min(...L))/mean*100:0,
+    V_total_cm3:rows.reduce((s,r)=>s+r.V_mm3,0)/1000,
+    ok:v.msgs.length===0 && so.n_crossing===0};
+}
+
+/* =========================================================================
+   회로 맵 에디터 (SVG) — 가로 = 단(i), 세로 = 열(r, 공기 흐름 ↓)
+   ========================================================================= */
+let ceDrag=false, ceLast=-1;
+function ceOpen(){ document.getElementById("ceModal").hidden=false; ceRender(); }
+function ceClose(){ document.getElementById("ceModal").hidden=true; }
+
+function ceRender(){
+  const svg=document.getElementById("ceSvg"), box=svg.parentElement.getBoundingClientRect();
+  const W=Math.max(360,box.width-24), H=Math.max(220,box.height-24);
+  const xy=XY(), B0=bbox();
+  const pad=26, sx=v=>pad+(v-B0.y0)/(B0.y1-B0.y0)*(W-2*pad),
+                sy=v=>pad+(v-B0.x0)/(B0.x1-B0.x0)*(H-2*pad);
+  const rad=Math.max(6,Math.min(16,(W-2*pad)/P.Nt*0.30,(H-2*pad)/P.Nr*0.34));
+  const own={}; CIRC.list.forEach((c,ix)=>c.tubes.forEach((t,k)=>own[t]={ix,k,id:c.id}));
+
+  let s=`<rect x="0" y="0" width="${W}" height="${H}" fill="none"/>`;
+  s+=`<defs><marker id="ah" markerWidth="7" markerHeight="7" refX="6" refY="3.5"
+        orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="currentColor"/></marker></defs>`;
+  s+=`<text x="${pad-14}" y="${pad-10}" class="ceax">단 i →</text>`;
+  s+=`<text x="${pad-14}" y="${H-6}" class="ceax">공기 ↓ (열 r)</text>`;
+
+  // 연결선
+  CIRC.bends.forEach(b=>{
+    const col=b.bad?"#DC5B4C":cColor(CIRC.list.findIndex(c=>c.id===b.c));
+    const x1=sx(xy[b.a].y), y1=sy(xy[b.a].x), x2=sx(xy[b.b].y), y2=sy(xy[b.b].x);
+    const mx=(x1+x2)/2, my=(y1+y2)/2, nx=-(y2-y1), ny=(x2-x1);
+    const nl=Math.hypot(nx,ny)||1, off=(b.end==="z1"?1:-1)*Math.min(16,nl*0.16);
+    s+=`<path d="M${x1},${y1} Q${mx+nx/nl*off},${my+ny/nl*off} ${x2},${y2}"
+         fill="none" stroke="${col}" stroke-width="${b.bad?3.2:2}"
+         ${b.bad?'stroke-dasharray="5 3"':''} opacity=".9"/>`;
+    s+=`<circle cx="${mx+nx/nl*off*0.5}" cy="${my+ny/nl*off*0.5}" r="2.6"
+         fill="${b.end==="z1"?col:"#fff"}" stroke="${col}" stroke-width="1.2"/>`;
+  });
+  // 입출구
+  CIRC.ports.forEach(p0=>{
+    const ix=CIRC.list.findIndex(c=>c.id===p0.circuit), col=cColor(ix);
+    const X=sx(xy[p0.tube].y), Y=sy(xy[p0.tube].x), d=p0.kind==="inlet"?-1:1;
+    s+=`<g color="${col}"><line x1="${X+d*rad*2.1}" y1="${Y}" x2="${X+d*rad*1.15}" y2="${Y}"
+        stroke="${col}" stroke-width="1.8" marker-end="${p0.kind==="inlet"?'url(#ah)':''}"/>
+        <text x="${X+d*rad*2.6}" y="${Y+3}" class="ceio" fill="${col}"
+        text-anchor="${p0.kind==="inlet"?'end':'start'}">${p0.kind==="inlet"?"IN":"OUT"}</text></g>`;
+  });
+  // 관
+  for(let r=0;r<P.Nr;r++) for(let i=0;i<P.Nt;i++){
+    const t=tidOf(r,i), o=own[t], col=o?cColor(o.ix):"#C9DDF2";
+    const X=sx(xy[t].y), Y=sy(xy[t].x), act=o&&o.ix===CIRC.active;
+    s+=`<circle class="cetube" data-t="${t}" cx="${X}" cy="${Y}" r="${rad}"
+         fill="${o?col:"#fff"}" fill-opacity="${o?(act?.95:.42):1}"
+         stroke="${o?col:"#C9DDF2"}" stroke-width="${act?2.4:1.4}"/>`;
+    if(o) s+=`<text x="${X}" y="${Y+3.2}" class="cenum"
+         fill="${act?"#fff":col}">${o.k+1}</text>`;
+  }
+  svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+  svg.setAttribute("width",W); svg.setAttribute("height",H);
+  svg.innerHTML=s;
+  svg.querySelectorAll(".cetube").forEach(n=>{
+    n.onpointerdown=e=>{const t=+n.dataset.t; ceDrag=true; ceLast=t; cePick(t); e.preventDefault();};
+    n.onpointerenter=()=>{ const t=+n.dataset.t;      // 같은 관 재진입은 무시
+      if(ceDrag && t!==ceLast){ ceLast=t; cePick(t,true); } };
+  });
+  ceSide();
+}
+addEventListener("pointerup",()=>{ceDrag=false; ceLast=-1;});
+
+function cePick(t,dragging){
+  const cur=CIRC.list[CIRC.active]; if(!cur) return;
+  const holder=CIRC.list.findIndex(c=>c.tubes.includes(t));
+  if(holder>=0 && holder!==CIRC.active){ if(!dragging){CIRC.active=holder; ceRender();} return; }
+  const at=cur.tubes.indexOf(t);
+  if(at>=0){ if(!dragging && at===cur.tubes.length-1) cur.tubes.pop(); else return; }
+  else cur.tubes.push(t);
+  CIRC.pattern="custom"; analyzeCircuits(); ceRender(); refresh(true);
+}
+
+function ceSide(){
+  const R=CIRC.rep, so=R.standoff;
+  document.getElementById("ceStat").innerHTML =
+    R.ok ? `<b style="color:var(--ok)">검증 통과</b> · 회로 ${CIRC.list.length}개 · `
+           +`유로 평균 ${fmt(R.path_mean_mm,0)}mm · 편차 ${R.path_spread_pct.toFixed(1)}%`
+         : `<b style="color:var(--bad)">불가</b> · 경고 ${R.warnings.length}건 · 구조적 교차 ${so.n_crossing}건`;
+
+  document.getElementById("ceList").innerHTML = R.circuits.map((c,ix)=>`
+    <div class="cerow ${ix===CIRC.active?'on':''}" data-ix="${ix}">
+      <i style="background:${c.color}"></i>
+      <b>${c.id}</b>
+      <span>관 ${c.n_tube} · 벤드 ${c.n_bend}</span>
+      <span class="num">${fmt(c.path_mm,0)}mm</span>
+      <button class="cein" data-ix="${ix}" title="입구 끝단">${CIRC.list[ix].inlet_end}</button>
+      <button class="cedel" data-ix="${ix}" title="삭제">×</button>
+    </div>`).join("");
+  document.querySelectorAll(".cerow").forEach(n=>n.onclick=e=>{
+    if(e.target.closest("button"))return; CIRC.active=+n.dataset.ix; ceRender();});
+  document.querySelectorAll(".cein").forEach(n=>n.onclick=()=>{
+    const c=CIRC.list[+n.dataset.ix]; c.inlet_end=c.inlet_end==="z0"?"z1":"z0";
+    CIRC.pattern="custom"; analyzeCircuits(); ceRender(); refresh(true);});
+  document.querySelectorAll(".cedel").forEach(n=>n.onclick=()=>{
+    CIRC.list.splice(+n.dataset.ix,1); CIRC.active=0; CIRC.pattern="custom";
+    analyzeCircuits(); ceRender(); refresh(true);});
+
+  const w=[]; R.warnings.slice(0,6).forEach(m=>w.push(`⚠ ${m}`));
+  so.crossings.forEach(c=>w.push(`✗ 구조적 교차 ${c.bend} (${c.end}, span ${c.span}mm) ↔ ${c.with.join(", ")}`));
+  document.getElementById("ceWarn").innerHTML =
+    w.length ? w.join("<br>") : "문제 없음. 스탠드오프 해소 "+so.n_resolved+"건, 최대 돌출 "+so.max_protrusion_mm+"mm";
+  document.getElementById("ceWarn").className = w.length?"cewarn bad":"cewarn ok";
+}
+
+/* =========================================================================
+   2. UI 구성
+   ========================================================================= */
+const GROUPS = [
+ {t:"관 (Tube)", sub:"HX-Sim ft_spec 호환", cols:2, f:[
+   {k:"Do",l:"외경 Do",u:"mm",s:.01},{k:"Di",l:"내경 Di",u:"mm",s:.01},
+   {k:"L",l:"관 길이",u:"mm",s:1},{k:"layout",l:"배열",type:"seg",o:["inline","staggered"]},
+   {k:"Nr",l:"열수 Nr",u:"ea",s:1,int:1},{k:"Nt",l:"단수 Nt",u:"ea",s:1,int:1},
+   {k:"Pt",l:"횡피치 Pt",u:"mm",s:.1},{k:"Pl",l:"종피치 Pl",u:"mm",s:.1}]},
+
+ {t:"핀 (Fin)", sub:"형상 생성 안 함 · 포러스 처리", cols:2, f:[
+   {k:"FPI",l:"핀 밀도",u:"1/in",s:.5},{k:"t_f",l:"핀 두께",u:"mm",s:.005},
+   {k:"fin_type",l:"핀 형상",type:"sel",o:["plain","wavy","louver","slit"],span:2}],
+  note:"핀은 CFD 형상으로 만들지 않음. 코어 존을 포러스로 두고 블로키지를 공극률 γ로 넘김. 아래 3D의 핀은 확인용 표시일 뿐 해석 도메인이 아님."},
+
+ {t:"유동 도메인", sub:"자동 생성", cols:2, f:[
+   {k:"L_up",l:"상류 연장",u:"mm",s:10},{k:"L_down",l:"하류 연장",u:"mm",s:10},
+   {k:"autoExt",l:"연장 길이 자동",type:"chk",span:2}]},
+
+ {t:"냉매 도메인", sub:"관내 실형상 해상", cols:2, f:[
+   {k:"include_tube_fluid",l:"관내 냉매 체적 생성",type:"chk",span:2},
+   {k:"include_bends",l:"리턴 벤드 (사행 회로)",type:"chk",span:2},
+   {k:"N_d",l:"관경 방향 분할",u:"ea",s:1,int:1},
+   {k:"split_core_by_row",l:"코어 열별 분할",type:"chk"}],
+  note:"공기측과 달리 관내는 근사 없이 형상 그대로 해상함. 단상에서는 완전발달 유동이라 CFD가 새로 알려주는 게 적고, 값어치는 관벽 온도분포(conjugate)에 있음. 2상으로 가면 관내는 1D 세그먼트(HX-Sim)로 넘기는 게 맞음."},
+
+ {t:"메시 개략 추정", sub:"참고값", cols:2, f:[
+   {k:"h_base",l:"기준 셀 크기",u:"mm",s:.1},{k:"n_prism",l:"프리즘 층수",u:"ea",s:1,int:1}]},
+
+ {t:"표시", cols:1, custom:"display"}
+];
+
+const rail=document.getElementById("rail");
+function buildUI(){
+  rail.innerHTML="";
+  GROUPS.forEach(g=>{
+    const d=document.createElement("div"); d.className="grp";
+    d.innerHTML=`<h3>${g.t}<i></i>${g.sub?`<em>${g.sub}</em>`:""}</h3>`;
+    if(g.custom==="display"){ d.appendChild(displayBlock()); }
+    else{
+      const w=document.createElement("div"); w.className="fields"+(g.cols===1?" one":"");
+      g.f.forEach(f=>w.appendChild(field(f)));
+      d.appendChild(w);
+    }
+    if(g.note) d.insertAdjacentHTML("beforeend",`<div class="note">${g.note}</div>`);
+    rail.appendChild(d);
+  });
+  const eb=document.createElement("div"); eb.className="err"; eb.id="errs"; rail.appendChild(eb);
+}
+function field(f){
+  const w=document.createElement("div"); w.className="f";
+  if(f.span) w.style.gridColumn=`span ${f.span}`;
+  if(f.type==="seg"){
+    w.innerHTML=`<label>${f.l}</label><div class="seg">${
+      f.o.map(o=>`<button data-k="${f.k}" data-v="${o}" aria-pressed="${P[f.k]===o}">${o}</button>`).join("")}</div>`;
+    w.querySelectorAll("button").forEach(b=>b.onclick=()=>{P[f.k]=b.dataset.v;refresh(true);});
+  } else if(f.type==="sel"){
+    w.innerHTML=`<label>${f.l}</label><select data-k="${f.k}">${
+      f.o.map(o=>`<option ${P[f.k]===o?"selected":""}>${o}</option>`).join("")}</select>`;
+    w.querySelector("select").onchange=e=>{P[f.k]=e.target.value;refresh(false);};
+  } else if(f.type==="chk"){
+    w.innerHTML=`<label class="tg" style="margin-top:4px"><input type="checkbox" ${P[f.k]?"checked":""}> ${f.l}</label>`;
+    w.querySelector("input").onchange=e=>{P[f.k]=e.target.checked;refresh(true);};
+  } else {
+    w.innerHTML=`<label>${f.l}<em>${f.u||""}</em></label>
+      <input type="number" step="${f.s}" value="${P[f.k]}" data-k="${f.k}">`;
+    const i=w.querySelector("input");
+    i.oninput=()=>{ let v=parseFloat(i.value); if(isNaN(v))return;
+      if(f.int) v=Math.max(1,Math.round(v)); P[f.k]=v; refresh(true); };
+  }
+  return w;
+}
+function displayBlock(){
+  const w=document.createElement("div");
+  const sw={tube:"var(--copper)",fin:"var(--alum)",bend:"var(--copper)",
+            ref:"var(--ref)",air:"var(--air)",core:"var(--air)"};
+  const lb={tube:"관",fin:"핀",bend:"리턴 벤드",ref:"냉매 도메인",air:"공기 도메인",core:"코어 존"};
+  w.innerHTML=`<div class="toggles">${Object.keys(lb).map(k=>
+    `<label class="tg" style="--sw:${sw[k]}"><input type="checkbox" data-s="${k}" ${P.show[k]?"checked":""}>${lb[k]}</label>`).join("")}</div>
+    <div class="fields one" style="padding-top:0">
+      <div class="f"><label>핀 표시 밀도<em>표시 전용</em></label>
+      <select id="finDen">
+        <option value="1">전체 (무거움)</option><option value="4" selected>1 : 4</option>
+        <option value="8">1 : 8</option><option value="0">숨김</option>
+      </select></div></div>`;
+  w.querySelectorAll("[data-s]").forEach(c=>c.onchange=e=>{P.show[e.target.dataset.s]=e.target.checked;applyVis();});
+  w.querySelector("#finDen").onchange=e=>{P.finDensity=+e.target.value;refresh(true);};
+  return w;
+}
+
+/* =========================================================================
+   3. Three.js 씬
+   ========================================================================= */
+const cv=document.getElementById("cv"), view=document.getElementById("view");
+const renderer=new THREE.WebGLRenderer({canvas:cv,antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setClearColor(0x000000,0);
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(38,1,1,20000);
+scene.add(new THREE.HemisphereLight(0xFFFFFF,0xBBD3EA,1.05));
+const d1=new THREE.DirectionalLight(0xFFFFFF,.72); d1.position.set(1,1.5,1.1); scene.add(d1);
+const d2=new THREE.DirectionalLight(0xCFE4F7,.45); d2.position.set(-1.2,-.4,-.9); scene.add(d2);
+const d3=new THREE.DirectionalLight(0xFFFFFF,.30); d3.position.set(.2,-1,.4); scene.add(d3);
+
+const G={tube:new THREE.Group(),fin:new THREE.Group(),bend:new THREE.Group(),
+         ref:new THREE.Group(),air:new THREE.Group(),core:new THREE.Group()};
+Object.values(G).forEach(g=>scene.add(g));
+
+const M={
+  copper:new THREE.MeshStandardMaterial({color:0xC8763C,metalness:.70,roughness:.32}),
+  alum:new THREE.MeshStandardMaterial({color:0xA9C4DC,metalness:.42,roughness:.46,
+        transparent:true,opacity:.62,side:THREE.DoubleSide}),
+  air:new THREE.MeshBasicMaterial({color:0x2E9BE0,transparent:true,opacity:.075,depthWrite:false}),
+  core:new THREE.MeshBasicMaterial({color:0x1F7AE0,transparent:true,opacity:.055,depthWrite:false}),
+  edgeAir:new THREE.LineBasicMaterial({color:0x2E9BE0,transparent:true,opacity:.62}),
+  edgeCore:new THREE.LineBasicMaterial({color:0x1466C4,transparent:true,opacity:.72}),
+  ref:new THREE.MeshStandardMaterial({color:0x7C5CE0,metalness:.15,roughness:.42,
+        emissive:0x2A1668,emissiveIntensity:.22}),
+  badBend:new THREE.MeshStandardMaterial({color:0xDC5B4C,metalness:.2,roughness:.5,
+        emissive:0x5A100A,emissiveIntensity:.3})
+};
+
+function clearGroup(g){
+  while(g.children.length){
+    const c=g.children.pop();
+    if(c.geometry) c.geometry.dispose();
+    g.remove(c);
+  }
+}
+function boxMesh(x0,x1,y0,y1,z0,z1,mat,emat){
+  const g=new THREE.BoxGeometry(x1-x0,y1-y0,z1-z0);
+  const m=new THREE.Mesh(g,mat);
+  m.position.set((x0+x1)/2,(y0+y1)/2,(z0+z1)/2);
+  const e=new THREE.LineSegments(new THREE.EdgesGeometry(g),emat);
+  e.position.copy(m.position);
+  return [m,e];
+}
+
+function rebuild(){
+  reconcileCircuits();
+  Object.values(G).forEach(clearGroup);
+  const b=bbox(), C=centers(), d=derived(), xy=XY();
+  const ext = 0;
+  const zLen = (b.z1-b.z0) + 2*ext;
+
+  // --- 관 ---
+  const tg=new THREE.CylinderGeometry(P.Do/2,P.Do/2,zLen,26,1,false);
+  tg.rotateX(Math.PI/2);
+  const im=new THREE.InstancedMesh(tg,M.copper,C.length);
+  const mtx=new THREE.Matrix4();
+  C.forEach((c,i)=>{ mtx.makeTranslation(c.x,c.y,(b.z0+b.z1)/2); im.setMatrixAt(i,mtx); });
+  im.instanceMatrix.needsUpdate=true; G.tube.add(im);
+
+  // --- 핀 (표시 전용) ---
+  if(P.finDensity>0){
+    const shp=new THREE.Shape();
+    shp.moveTo(b.x0,b.y0); shp.lineTo(b.x1,b.y0); shp.lineTo(b.x1,b.y1); shp.lineTo(b.x0,b.y1); shp.closePath();
+    C.forEach(c=>{ const h=new THREE.Path(); h.absarc(c.x,c.y,P.Do/2,0,Math.PI*2,true); shp.holes.push(h); });
+    const fg=new THREE.ExtrudeGeometry(shp,{depth:P.t_f,bevelEnabled:false,curveSegments:14});
+    const nShow=Math.max(1,Math.floor(d.N_fin/P.finDensity));
+    const fim=new THREE.InstancedMesh(fg,M.alum,nShow);
+    const step=(b.z1-b.z0)/nShow;
+    for(let i=0;i<nShow;i++){ mtx.makeTranslation(0,0,b.z0+step*(i+.5)); fim.setMatrixAt(i,mtx); }
+    fim.instanceMatrix.needsUpdate=true; G.fin.add(fim);
+  }
+
+  // --- 냉매 도메인: 직관부 ---
+  if(P.include_tube_fluid){
+    const rg=new THREE.CylinderGeometry(P.Di/2,P.Di/2,zLen,22,1,false);
+    rg.rotateX(Math.PI/2);
+    const rim=new THREE.InstancedMesh(rg,M.ref,C.length);
+    C.forEach((c,i)=>{ mtx.makeTranslation(c.x,c.y,(b.z0+b.z1)/2); rim.setMatrixAt(i,mtx); });
+    rim.instanceMatrix.needsUpdate=true; G.ref.add(rim);
+  }
+
+  // --- 리턴 벤드 (회로 기반, 임의 관 쌍) ---
+  CIRC.bends.forEach(bd=>{
+    const sgn = bd.end==="z1" ? 1 : -1;
+    const ze  = bd.end==="z1" ? b.z1 : b.z0, zs = ze + sgn*bd.standoff;
+    const put=(rad,mat,grp)=>{
+      const g=new THREE.TorusGeometry(bd.R,rad,14,30,Math.PI);
+      g.rotateX(sgn>0?Math.PI/2:-Math.PI/2);     // 끝점 ±X, 볼록 ±Z
+      const m=new THREE.Mesh(g,mat);
+      m.position.set(bd.cx,bd.cy,zs); m.rotation.z=bd.th;   // 끝점을 d 방향으로
+      grp.add(m);
+      if(bd.standoff>0){
+        const sg=new THREE.CylinderGeometry(rad,rad,bd.standoff,16,1,false);
+        sg.rotateX(Math.PI/2);
+        [bd.a,bd.b].forEach(t=>{ const st=new THREE.Mesh(sg,mat);
+          st.position.set(xy[t].x,xy[t].y,ze+sgn*bd.standoff/2); grp.add(st); });
+      }
+    };
+    put(P.Do/2, bd.bad?M.badBend:M.copper, G.bend);
+    if(P.include_tube_fluid) put(P.Di/2, M.ref, G.ref);
+  });
+
+  // --- 유동 도메인 ---
+  if(P.autoExt){ const a=autoExtents(); P.L_up=a.up; P.L_down=a.down; }
+  boxMesh(b.x0-P.L_up,b.x0,b.y0,b.y1,b.z0,b.z1,M.air,M.edgeAir).forEach(o=>G.air.add(o));
+  boxMesh(b.x1,b.x1+P.L_down,b.y0,b.y1,b.z0,b.z1,M.air,M.edgeAir).forEach(o=>G.air.add(o));
+  const nSlab=P.split_core_by_row?P.Nr:1, sw=(b.x1-b.x0)/nSlab;
+  for(let i=0;i<nSlab;i++)
+    boxMesh(b.x0+i*sw,b.x0+(i+1)*sw,b.y0,b.y1,b.z0,b.z1,M.core,M.edgeCore).forEach(o=>G.core.add(o));
+
+  applyVis();
+  frame(false);
+}
+function applyVis(){
+  Object.keys(G).forEach(k=>G[k].visible=!!P.show[k]);
+  G.ref.visible = !!P.show.ref && P.include_tube_fluid;
+  const see = G.ref.visible && P.show.tube;          // 관 안이 비쳐 보이게
+  M.copper.transparent=see; M.copper.opacity=see?.38:1;
+  M.copper.depthWrite=!see; M.copper.needsUpdate=true;
+}
+
+/* ---------- 오빗 컨트롤 ---------- */
+const target=new THREE.Vector3();
+let sph={r:1200,th:Math.PI*0.32,ph:Math.PI*0.36}, drag=null, userView=false;
+
+/* ── 프레이밍 ──────────────────────────────────────────────
+   viewMode="core" : 열교환기 코어(관+핀+벤드) 를 화면 중앙에 꽉 채움  ← 기본
+   viewMode="all"  : 상·하류 연장까지 포함한 전체 유동 도메인
+   바운딩구가 아니라 카메라 축(right/up/forward)에 8개 꼭짓점을 투영해
+   가로·세로 각각 필요한 거리를 구하므로, 어떤 종횡비·각도에서도 정확히 중앙에 옴 */
+let viewMode="core";
+
+function fullBox(){
+  const b=bbox();
+  return {x0:b.x0-P.L_up, x1:b.x1+P.L_down, y0:b.y0, y1:b.y1, z0:b.z0, z1:b.z1};
+}
+function coreBox(){
+  const b=bbox();
+  const e=P.include_bends? (CIRC.rep.standoff.max_protrusion_mm||P.Pt/2)+8 : 0;
+  return {x0:b.x0, x1:b.x1, y0:b.y0, y1:b.y1, z0:b.z0-e, z1:b.z1+e};
+}
+function camBasis(){
+  const z=new THREE.Vector3(Math.sin(sph.ph)*Math.sin(sph.th),
+                            Math.cos(sph.ph),
+                            Math.sin(sph.ph)*Math.cos(sph.th)).normalize();
+  const x=new THREE.Vector3(0,1,0).cross(z);
+  if(x.lengthSq()<1e-9) x.set(1,0,0);
+  x.normalize();
+  const y=z.clone().cross(x).normalize();
+  return {x,y,z};
+}
+function frame(force){
+  if(userView && !force){ place(); return; }
+  const f = (viewMode==="core") ? coreBox() : fullBox();
+  const c = new THREE.Vector3((f.x0+f.x1)/2,(f.y0+f.y1)/2,(f.z0+f.z1)/2);
+  const B = camBasis();
+  let hx=0, hy=0, hz=0, v=new THREE.Vector3();
+  for(const X of [f.x0,f.x1]) for(const Y of [f.y0,f.y1]) for(const Z of [f.z0,f.z1]){
+    v.set(X,Y,Z).sub(c);
+    hx=Math.max(hx,Math.abs(v.dot(B.x)));
+    hy=Math.max(hy,Math.abs(v.dot(B.y)));
+    hz=Math.max(hz,Math.abs(v.dot(B.z)));
+  }
+  const tV=Math.tan(camera.fov*Math.PI/360);
+  const tH=tV*Math.max(camera.aspect,.3);
+  target.copy(c);
+  sph.r = Math.max(hy/tV, hx/tH)*1.10 + hz;
+  if(force) userView=false;
+  place();
+}
+function place(){
+  camera.position.set(
+    target.x+sph.r*Math.sin(sph.ph)*Math.sin(sph.th),
+    target.y+sph.r*Math.cos(sph.ph),
+    target.z+sph.r*Math.sin(sph.ph)*Math.cos(sph.th));
+  camera.lookAt(target);
+}
+view.addEventListener("pointerdown",e=>{drag={x:e.clientX,y:e.clientY,pan:e.shiftKey||e.button===2};
+  view.setPointerCapture(e.pointerId);});
+view.addEventListener("pointermove",e=>{
+  if(!drag)return; const dx=e.clientX-drag.x, dy=e.clientY-drag.y; drag.x=e.clientX; drag.y=e.clientY;
+  if(drag.pan){
+    const s=sph.r*0.0014;
+    const right=new THREE.Vector3().setFromMatrixColumn(camera.matrix,0);
+    const up=new THREE.Vector3().setFromMatrixColumn(camera.matrix,1);
+    target.addScaledVector(right,-dx*s).addScaledVector(up,dy*s); userView=true;
+  } else { sph.th-=dx*.007; sph.ph=Math.max(.05,Math.min(Math.PI-.05,sph.ph-dy*.007)); }
+  place();
+});
+addEventListener("pointerup",()=>drag=null);
+view.addEventListener("contextmenu",e=>e.preventDefault());
+view.addEventListener("wheel",e=>{e.preventDefault();
+  sph.r=Math.max(40,Math.min(30000,sph.r*(1+Math.sign(e.deltaY)*.11))); userView=true; place();},{passive:false});
+
+function resize(){
+  const w=view.clientWidth,h=view.clientHeight;
+  renderer.setSize(w,h,true); camera.aspect=w/h; camera.updateProjectionMatrix();
+}
+addEventListener("resize",()=>{resize();frame(false);});
+(function loop(){ requestAnimationFrame(loop); renderer.render(scene,camera); })();
+
+/* =========================================================================
+   4. HUD · 존 스트립
+   ========================================================================= */
+const fmt=(v,n=1)=>v.toLocaleString("ko-KR",{minimumFractionDigits:n,maximumFractionDigits:n});
+const big=v=> v>=1e6 ? (v/1e6).toFixed(2)+" M" : v>=1e3 ? (v/1e3).toFixed(0)+" k" : Math.round(v);
+
+function paint(){
+  const d=derived(), Z=zones();
+  document.getElementById("hudR").innerHTML=`
+    <div>코어 <b>${fmt(d.W)} × ${fmt(d.H)} × ${fmt(d.L,0)}</b> mm</div>
+    <div>관 <b>${d.n_tube}</b> ea · 핀 <b>${d.N_fin}</b> 장</div>
+    <div>전열면적 <b>${fmt(d.A_o/1e6,2)}</b> m²</div>`;
+  document.getElementById("hudL").innerHTML=`
+    <div>공극률 γ <b>${d.gamma.toFixed(4)}</b></div>
+    <div>최소유동비 σ <b>${d.sigma.toFixed(4)}</b></div>
+    <div>면적밀도 a<sub>v</sub> <b>${fmt(d.a_v,0)}</b> 1/m</div>
+    <div>수력직경 D<sub>h</sub> <b>${fmt(d.D_h,2)}</b> mm</div>`;
+
+  document.getElementById("zoneSummary").textContent =
+    `총 ${fmt(P.L_up+d.W+P.L_down,0)} mm · 존 ${Z.list.length}개 · 개략 ${big(Z.total)} 셀 (프리즘 ${big(Z.prism)} 포함)`;
+
+  const tot=Z.list.reduce((s,z)=>s+z.dx,0);
+  document.getElementById("zoneBar").innerHTML=Z.list.map(z=>
+    `<div class="zone ${z.k}" style="flex:${(z.dx/tot).toFixed(4)} 1 0" title="${z.name} · ${fmt(z.dx,0)} mm">
+       <span class="zn">${z.name.replace("fluid_air_","")}</span>
+       <span class="zv">${fmt(z.dx,0)}mm · ${big(z.cells)}</span></div>`).join("");
+  document.getElementById("zoneRuler").innerHTML=
+    `<span style="flex:${P.L_up/tot}">0</span>`+
+    `<span style="flex:${d.W/tot}">${fmt(P.L_up,0)} — 코어 (포러스)</span>`+
+    `<span style="flex:${P.L_down/tot}">${fmt(P.L_up+d.W,0)} — ${fmt(tot,0)} mm</span>`;
+
+  // 냉매 도메인 스트립
+  const R=refDerived(), on=P.include_tube_fluid;
+  document.getElementById("refHead").classList.toggle("refoff",!on);
+  document.getElementById("refBar").classList.toggle("refoff",!on);
+  if(on){
+    document.getElementById("refSummary").textContent =
+      `${CIRC.pattern} · 회로 ${R.nCirc}개(입구 ${R.nCirc}·출구 ${R.nCirc}) · `+
+      `유로 평균 ${fmt(R.path,0)} mm (편차 ${R.spread.toFixed(1)}%) · `+
+      `내부체적 ${fmt(R.V_tot/1000,1)} cm³ · h=${fmt(R.h,2)}mm → 개략 ${big(R.cells)} 셀`
+      + (CIRC.rep.ok ? "" : `  ⚠ 회로 검증 불가 (교차 ${CIRC.rep.standoff.n_crossing}건)`);
+    const segs=[{k:"ref",n:`fluid_ref × ${R.nStr}`,v:R.V_str,c:R.cells_str}];
+    if(R.nBend>0) segs.push({k:"bend",n:`fluid_bend × ${R.nBend}`,v:R.V_bend,c:R.cells_bend});
+    const tv=segs.reduce((a,z)=>a+z.v,0);
+    document.getElementById("refBar").innerHTML=segs.map(z=>
+      `<div class="zone ${z.k}" style="flex:${(z.v/tv).toFixed(4)} 1 0"
+         title="${z.n} · ${fmt(z.v/1000,1)} cm³">
+         <span class="zn">${z.n}</span>
+         <span class="zv">${fmt(z.v/1000,1)}cm³ · ${big(z.c)}</span></div>`).join("");
+  }
+
+  const errs=validate();
+  document.getElementById("errs").innerHTML=errs.map(e=>"⚠ "+e).join("<br>");
+  ["btnStlSolid","btnStlAir","btnStlRef","btnJson"].forEach(id=>document.getElementById(id).disabled=errs.length>0);
+
+  // 상류/하류 입력값 동기화 (자동 모드)
+  if(P.autoExt) rail.querySelectorAll('input[data-k="L_up"],input[data-k="L_down"]')
+    .forEach(i=>i.value=P[i.dataset.k]);
+}
+
+/* 축 삼면체 */
+function axisTriad(){
+  const s=document.getElementById("axis"), o=[40,46];
+  const ax=[["x",[30,14],"#2E9BE0"],["y",[0,-30],"#1466C4"],["z",[-24,12],"#C8763C"]];
+  s.innerHTML=ax.map(([n,[dx,dy],c])=>
+    `<line x1="${o[0]}" y1="${o[1]}" x2="${o[0]+dx}" y2="${o[1]+dy}" stroke="${c}" stroke-width="1.2"/>
+     <text x="${o[0]+dx*1.22}" y="${o[1]+dy*1.22+3}" fill="${c}" font-family="IBM Plex Mono"
+       font-size="8.5" text-anchor="middle">${n}</text>`).join("");
+}
+
+/* =========================================================================
+   5. 내보내기
+   ========================================================================= */
+function collectTris(groups){
+  const tris=[], A=new THREE.Vector3(),B=new THREE.Vector3(),Cv=new THREE.Vector3(),
+        im=new THREE.Matrix4();
+  groups.forEach(g=>g.traverse(n=>{
+    if(!n.isMesh) return;
+    n.updateWorldMatrix(true,false);
+    const geo=n.geometry, pos=geo.attributes.position, idx=geo.index;
+    const nt = idx ? idx.count/3 : pos.count/3;
+    const mats=[];
+    if(n.isInstancedMesh){
+      for(let i=0;i<n.count;i++){ n.getMatrixAt(i,im);
+        mats.push(new THREE.Matrix4().multiplyMatrices(n.matrixWorld,im)); }
+    } else mats.push(n.matrixWorld.clone());
+    mats.forEach(Mx=>{
+      for(let t=0;t<nt;t++){
+        const a=idx?idx.getX(t*3):t*3, b=idx?idx.getX(t*3+1):t*3+1, c=idx?idx.getX(t*3+2):t*3+2;
+        A.fromBufferAttribute(pos,a).applyMatrix4(Mx);
+        B.fromBufferAttribute(pos,b).applyMatrix4(Mx);
+        Cv.fromBufferAttribute(pos,c).applyMatrix4(Mx);
+        tris.push(A.x,A.y,A.z,B.x,B.y,B.z,Cv.x,Cv.y,Cv.z);
+      }
+    });
+  }));
+  return tris;
+}
+function binarySTL(tris){
+  const n=tris.length/9, buf=new ArrayBuffer(84+n*50), dv=new DataView(buf);
+  const head="FT-HX CFD Studio binary STL (mm)";
+  for(let i=0;i<head.length;i++) dv.setUint8(i,head.charCodeAt(i));
+  dv.setUint32(80,n,true);
+  const u=new THREE.Vector3(),v=new THREE.Vector3(),nv=new THREE.Vector3();
+  for(let t=0;t<n;t++){
+    const o=t*9, p=84+t*50;
+    u.set(tris[o+3]-tris[o],tris[o+4]-tris[o+1],tris[o+5]-tris[o+2]);
+    v.set(tris[o+6]-tris[o],tris[o+7]-tris[o+1],tris[o+8]-tris[o+2]);
+    nv.crossVectors(u,v).normalize();
+    dv.setFloat32(p,nv.x,true); dv.setFloat32(p+4,nv.y,true); dv.setFloat32(p+8,nv.z,true);
+    for(let k=0;k<9;k++) dv.setFloat32(p+12+k*4,tris[o+k],true);
+    dv.setUint16(p+48,0,true);
+  }
+  return new Blob([buf],{type:"model/stl"});
+}
+function save(blob,fn){
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=fn;
+  a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+}
+document.getElementById("btnStlSolid").onclick=()=>{
+  const t=collectTris([G.tube,G.bend,...(P.finDensity>0?[G.fin]:[])]);
+  save(binarySTL(t),`${P.name}_solid.stl`);
+};
+document.getElementById("btnStlAir").onclick=()=>{
+  // 공기 도메인 경계 = 외곽 박스면 ∪ 관 외표면 (CSG 없이 메셔가 처리)
+  const t=collectTris([G.air,G.core,G.tube]);
+  save(binarySTL(t),`${P.name}_airdomain.stl`);
+};
+document.getElementById("btnStlRef").onclick=()=>{
+  if(!P.include_tube_fluid){ alert("관내 냉매 체적 생성이 꺼져 있음. 좌측 '냉매 도메인'에서 켜야 함."); return; }
+  save(binarySTL(collectTris([G.ref])),`${P.name}_refdomain.stl`);
+};
+function caseDoc(){
+  const b=bbox(), d=derived(), Z=zones();
+  const out={
+    name:P.name, units:"mm",
+    tube:{Do:P.Do,Di:P.Di,L:P.L,Nr:P.Nr,Nt:P.Nt,Pt:P.Pt,Pl:P.Pl,layout:P.layout,k_tube:386},
+    fin:{FPI:P.FPI,t_f:P.t_f,fin_type:P.fin_type,k_fin:205},
+    domain:{L_up:P.L_up,L_down:P.L_down,split_core_by_row:P.split_core_by_row,
+            include_tube_fluid:P.include_tube_fluid,include_bends:P.include_bends,bend_gap:8},
+    derived:{Fp_mm:d.Fp,N_fin:d.N_fin,sigma:d.sigma,porosity_gamma:d.gamma,
+             a_v_1perm:d.a_v,D_h_mm:d.D_h,A_o_mm2:d.A_o,V_zone_mm3:d.V_zone,
+             A_o_over_A_c:d.Ao_Ac,n_tube:d.n_tube},
+    ft_spec_SI:{Nr:P.Nr,Nt:P.Nt,N_seg:5,Di:P.Di/1000,Do:P.Do/1000,
+                Pt:P.Pt/1000,Pl:P.Pl/1000,FPI:P.FPI,fin_type:P.fin_type},
+    zones:Z.list.map(z=>({name:z.name,type:z.k==="core"?"porous":"fluid",
+                          dx_mm:z.dx,cells_est:Math.round(z.cells)})),
+    circuits:{pattern:CIRC.pattern,
+      list:CIRC.list.map(c=>({id:c.id,tubes:c.tubes,inlet_end:c.inlet_end,m_frac:c.m_frac})),
+      bends:CIRC.bends.map(b=>({circuit:b.c,k:b.k,a:b.a,b:b.b,end:b.end,
+        R:+b.R.toFixed(2),span:+b.span.toFixed(2),standoff:+b.standoff.toFixed(2),
+        level:b.level,crossing:b.bad})),
+      ports:CIRC.ports.map(o=>({name:o.name,circuit:o.circuit,kind:o.kind,
+        tube:o.tube,rc:o.rc,end:o.end,seed:o.seed.map(v=>+v.toFixed(2))})),
+      validation:{ok:CIRC.rep.ok,warnings:CIRC.rep.warnings,
+        standoff:CIRC.rep.standoff,
+        path_mean_mm:+(CIRC.rep.path_mean_mm||0).toFixed(1),
+        path_spread_pct:+(CIRC.rep.path_spread_pct||0).toFixed(2),
+        per_circuit:CIRC.rep.circuits}},
+    refrigerant:(()=>{const R=refDerived(); return P.include_tube_fluid ? {
+      n_circuit:R.nCirc, tubes_per_circuit:P.Nt,
+      path_len_per_circuit_mm:+R.path.toFixed(1),
+      A_cross_mm2:+R.A.toFixed(2), V_total_mm3:+R.V_tot.toFixed(0),
+      n_div_diameter:P.N_d, h_ref_mm:+R.h.toFixed(3),
+      cells_est:Math.round(R.cells),
+      zones:[{name:"fluid_ref_*",type:"fluid",count:R.nStr,V_mm3:+R.V_str.toFixed(0)}]
+        .concat(R.nBend? [{name:"fluid_bend_*",type:"fluid",count:R.nBend,V_mm3:+R.V_bend.toFixed(0)}]:[])
+    } : null;})(),
+    mesh_estimate:{h_base_mm:P.h_base,n_prism:P.n_prism,
+      cells_air_est:Math.round(Z.total),
+      cells_ref_est:P.include_tube_fluid?Math.round(refDerived().cells):0,
+      cells_total_est:Math.round(Z.total+(P.include_tube_fluid?refDerived().cells:0))},
+    face_seeds:{
+      air_inlet:[b.x0-P.L_up,(b.y0+b.y1)/2,(b.z0+b.z1)/2],
+      air_outlet:[b.x1+P.L_down,(b.y0+b.y1)/2,(b.z0+b.z1)/2],
+      casing_y_min:[(b.x0+b.x1)/2,b.y0,(b.z0+b.z1)/2],
+      casing_y_max:[(b.x0+b.x1)/2,b.y1,(b.z0+b.z1)/2],
+      side_z_min:[(b.x0+b.x1)/2,(b.y0+b.y1)/2,b.z0],
+      side_z_max:[(b.x0+b.x1)/2,(b.y0+b.y1)/2,b.z1]}
+  };
+  return out;
+}
+document.getElementById("btnJson").onclick=()=>{
+  save(new Blob([JSON.stringify(caseDoc(),null,2)],{type:"application/json"}),`${P.name}.json`);
+};
+
+/* ---- 로컬 서버 연동: 브라우저 형상을 그대로 STEP 으로 ---- */
+const btnStep=document.getElementById("btnStep");
+fetch("/api/health").then(r=>r.json()).then(h=>{
+  if(h&&h.ok){ btnStep.disabled=!h.cadquery;
+    btnStep.title=h.cadquery?"로컬 서버로 STEP 생성":"서버에 cadquery 미설치"; }
+}).catch(()=>{ btnStep.title="로컬 서버 없음 — python run.py 로 실행"; });
+
+btnStep.onclick=async()=>{
+  const d=caseDoc(); const old=btnStep.textContent;
+  btnStep.textContent="생성 중…"; btnStep.disabled=true;
+  try{
+    const r=await fetch("/api/export/step",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({case:{name:d.name,tube:d.tube,fin:d.fin,domain:d.domain,
+                                 circuits:d.circuits}, with_plenum:false})});
+    if(!r.ok) throw new Error(await r.text());
+    save(await r.blob(), `${P.name}.step`);
+  }catch(e){ alert("STEP 생성 실패: "+e.message); }
+  finally{ btnStep.textContent=old; btnStep.disabled=false; }
+};
+document.querySelectorAll("#fitSeg button").forEach(b=>b.onclick=()=>{
+  viewMode=b.dataset.fit==="core"?"core":"all";
+  document.querySelectorAll("#fitSeg button").forEach(o=>
+    o.setAttribute("aria-pressed", String(o===b)));
+  frame(true);
+});
+document.querySelectorAll("[data-preset]").forEach(b=>b.onclick=()=>{
+  Object.assign(P,PRESETS[b.dataset.preset]);
+  P.name = b.dataset.preset==="evap" ? "fthx_evap" : "fthx_cond";
+  buildUI(); refresh(true); fit();
+});
+
+/* =========================================================================
+   6. 구동
+   ========================================================================= */
+let pending=null;
+function refresh(geo){
+  if(validate().length===0 && geo){
+    clearTimeout(pending); pending=setTimeout(()=>{rebuild();paint();},70);
+  } else paint();
+}
+function fit(){ frame(true); }
+document.getElementById("btnCirc").onclick=ceOpen;
+document.getElementById("ceClose").onclick=ceClose;
+addEventListener("keydown",e=>{if(e.key==="Escape")ceClose();});
+document.querySelectorAll("[data-gen]").forEach(btn=>btn.onclick=()=>{
+  CIRC.pattern=btn.dataset.gen;
+  CIRC.nc=Math.max(1,parseInt(document.getElementById("ceN").value)||4);
+  regenCircuits(); ceRender(); refresh(true);});
+document.getElementById("ceN").onchange=e=>{
+  CIRC.nc=Math.max(1,parseInt(e.target.value)||4);
+  if(CIRC.pattern==="face_split"||CIRC.pattern==="interlaced"){
+    regenCircuits(); ceRender(); refresh(true);}};
+document.getElementById("ceAdd").onclick=()=>{
+  const n=CIRC.list.length+1;
+  CIRC.list.push({id:"c"+String(n).padStart(2,"0"),tubes:[],inlet_end:"z0",m_frac:null});
+  CIRC.active=CIRC.list.length-1; CIRC.pattern="custom"; analyzeCircuits(); ceRender();};
+
+regenCircuits();
+buildUI(); resize(); rebuild(); paint(); axisTriad(); frame(true);
+
+// .view 박스가 실제로 바뀔 때마다 재프레이밍 (폰트 로드·스트립 렌더·창 크기)
+if(window.ResizeObserver) new ResizeObserver(()=>{resize();frame(false);}).observe(view);
+addEventListener("resize",()=>{if(!document.getElementById("ceModal").hidden)ceRender();});
+requestAnimationFrame(()=>{resize();frame(true);});
+if(document.fonts&&document.fonts.ready) document.fonts.ready.then(()=>{resize();frame(true);});
+
+</script>
+</body>
+</html>

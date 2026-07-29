@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fthx-cfd-studio"
+version = "0.4.0"
+description = "핀-튜브 열교환기 3D 해석 전용 형상·회로 설계 도구"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["pydantic>=2.5","numpy>=1.24","scipy>=1.11",
+                "fastapi>=0.110","uvicorn[standard]>=0.27"]
+
+[project.optional-dependencies]
+cad = ["cadquery>=2.4"]
+props = ["CoolProp>=6.6"]
+dev = ["pytest>=7.4"]
+
+[tool.setuptools]
+packages = ["fthx", "server"]

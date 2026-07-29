@@ -1,0 +1,205 @@
+"""
+다중 입출구 처리 — 병렬 회로 유량 분배 예측 · porous jump 계수 산정
+
+배경
+----
+회로가 C개면 냉매 입구도 C개가 됨. 회로별로 mass-flow-inlet 을 따로 주면
+'분배를 알고 싶은데 분배를 입력해야 하는' 모순이 생김.
+→ 입구 플레넘 하나로 묶고 총유량만 경계조건으로 주면, 분배는 회로별
+   유로 저항 차이로 자연히 풀림.  단상 전제.
+
+이 모듈이 하는 일
+----------------
+1) 회로별 유로 저항으로 병렬 분배를 직접 푼다 (CFD 돌리기 전에 편차를 본다)
+2) 균등 분배를 만들려면 회로마다 얼마의 추가 저항이 필요한지 → Fluent
+   porous jump 의 C2 (관성 저항 계수) 로 환산한다
+
+⚠ 단상 한정. 2상에서는 분배가 압력강하가 아니라 입구 quality 와 관성 분리에
+   지배되므로 이 모델이 성립하지 않음.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+
+from scipy.optimize import brentq
+
+from .params import FTHXParams
+from . import circuits as CQC
+
+try:
+    import CoolProp.CoolProp as CP
+    HAS_CP = True
+except Exception:                                    # pragma: no cover
+    HAS_CP = False
+
+
+# ══════════════════════════════════════════════════════════════════
+#  물성
+# ══════════════════════════════════════════════════════════════════
+@dataclass
+class Fluid:
+    name: str = "R410A"
+    T_C: float = 7.0
+    quality: float = 1.0          # 1=포화증기, 0=포화액 (단상 근사용)
+    rho: Optional[float] = None   # kg/m3  (직접 주면 CoolProp 무시)
+    mu: Optional[float] = None    # Pa·s
+
+    def props(self) -> tuple[float, float]:
+        if self.rho is not None and self.mu is not None:
+            return self.rho, self.mu
+        if not HAS_CP:
+            raise RuntimeError("CoolProp 없음 — rho, mu 를 직접 지정할 것")
+        T = self.T_C + 273.15
+        return (CP.PropsSI("D", "T", T, "Q", self.quality, self.name),
+                CP.PropsSI("V", "T", T, "Q", self.quality, self.name))
+
+
+@dataclass
+class PlenumSpec:
+    """입구 분배기 / 출구 헤더 + 피더 튜브"""
+    D_plenum: float = 16.0        # mm, 플레넘 내경
+    offset: float = 45.0          # mm, 코어 끝면에서 플레넘 축까지
+    x_off: float = -35.0          # mm, 코어 앞면(x0) 기준 플레넘 축의 x 위치
+    D_feed: float = 4.0           # mm, 피더 내경 (모세관 상당)
+    split_frac: float = 0.5       # 피더를 둘로 쪼개는 위치 (porous jump 면)
+    jump_thick: float = 1.0       # mm, porous jump 매질 두께
+
+
+# ══════════════════════════════════════════════════════════════════
+#  마찰
+# ══════════════════════════════════════════════════════════════════
+def churchill_f(Re: float, rr: float = 0.0) -> float:
+    """Churchill(1977) — 층류·천이·난류 전 영역 연속. Darcy f."""
+    Re = max(Re, 1e-3)
+    A = (2.457 * math.log(1.0 / ((7.0 / Re) ** 0.9 + 0.27 * rr))) ** 16
+    B = (37530.0 / Re) ** 16
+    return 8.0 * ((8.0 / Re) ** 12 + 1.0 / (A + B) ** 1.5) ** (1.0 / 12.0)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  회로 저항
+# ══════════════════════════════════════════════════════════════════
+@dataclass
+class Leg:
+    """병렬 가지 하나 = 피더 + 회로 유로"""
+    cid: str
+    L_path: float        # mm, 관+벤드 유로길이
+    n_bend: int
+    L_feed: float        # mm, 피더 길이
+    jump_C2: float = 0.0 # 1/m, porous jump 관성계수 (0 = 없음)
+
+
+def leg_dp(leg: Leg, m: float, p: FTHXParams, pl: PlenumSpec,
+           rho: float, mu: float, K_bend: float = 0.7,
+           roughness: float = 1.5e-6) -> float:
+    """가지 압력강하 [Pa].  유로 길이에 벤드 호길이가 이미 포함돼 있으므로
+       K_bend 는 곡률에 의한 '추가' 손실만 담당함."""
+    out = 0.0
+    for D_mm, L_mm, nb in ((pl.D_feed, leg.L_feed, 0),
+                           (p.tube.Di, leg.L_path, leg.n_bend)):
+        if L_mm <= 0:
+            continue
+        D = D_mm / 1000.0
+        A = math.pi * D * D / 4.0
+        v = m / (rho * A)
+        Re = rho * v * D / mu
+        f = churchill_f(Re, roughness / D)
+        out += (f * (L_mm / 1000.0) / D + nb * K_bend) * 0.5 * rho * v * v
+    if leg.jump_C2 > 0:                       # porous jump (관성항)
+        D = pl.D_feed / 1000.0
+        v = m / (rho * math.pi * D * D / 4.0)
+        out += leg.jump_C2 * 0.5 * rho * v * v * (pl.jump_thick / 1000.0)
+    return out
+
+
+def _m_from_dp(leg, dp, *a, **kw) -> float:
+    """단조 증가하는 dp(m) 을 역으로 풀어 m 을 구함"""
+    if dp <= 0:
+        return 0.0
+    hi = 1e-4
+    while leg_dp(leg, hi, *a, **kw) < dp and hi < 10.0:
+        hi *= 2.0
+    return brentq(lambda m: leg_dp(leg, m, *a, **kw) - dp, 0.0, hi, xtol=1e-12)
+
+
+def solve_split(legs: List[Leg], m_total: float, p: FTHXParams, pl: PlenumSpec,
+                fl: Fluid, K_bend: float = 0.7) -> dict:
+    """병렬 가지가 같은 ΔP 를 갖도록 유량 분배를 품"""
+    rho, mu = fl.props()
+    args = (p, pl, rho, mu, K_bend)
+
+    def resid(dp):
+        return sum(_m_from_dp(l, dp, *args) for l in legs) - m_total
+
+    lo, hi = 1e-3, 1e3
+    while resid(hi) < 0 and hi < 1e9:
+        hi *= 10.0
+    dp = brentq(resid, lo, hi, xtol=1e-9)
+
+    rows = []
+    for l in legs:
+        m = _m_from_dp(l, dp, *args)
+        D = p.tube.Di / 1000.0
+        v = m / (rho * math.pi * D * D / 4.0)
+        rows.append({"id": l.cid, "m_gs": m * 1000.0, "frac": m / m_total,
+                     "v_ms": v, "Re": rho * v * D / mu,
+                     "dp_kPa": dp / 1000.0, "L_path_mm": l.L_path,
+                     "L_feed_mm": l.L_feed, "n_bend": l.n_bend})
+    fr = [r["frac"] for r in rows]
+    ideal = 1.0 / len(legs)
+    return {"dp_Pa": dp, "rho": rho, "mu": mu, "rows": rows,
+            "frac_min": min(fr), "frac_max": max(fr),
+            "maldist_pct": (max(fr) - min(fr)) / ideal * 100.0,
+            "worst_dev_pct": max(abs(f - ideal) for f in fr) / ideal * 100.0}
+
+
+def size_jumps(legs: List[Leg], m_total: float, p: FTHXParams, pl: PlenumSpec,
+               fl: Fluid, K_bend: float = 0.7) -> dict:
+    """균등 분배를 만드는 porous jump C2 를 회로별로 산정.
+
+    목표 유량 m* = m_total/C 에서 각 가지의 ΔP 를 구하고,
+    가장 큰 값에 맞추도록 부족분을 관성 저항으로 채움:
+        Δp_jump = C2 · ½ρv² · Δm    →    C2 = 2Δp_jump / (ρ v² Δm)
+    """
+    rho, mu = fl.props()
+    args = (p, pl, rho, mu, K_bend)
+    m_t = m_total / len(legs)
+    base = [leg_dp(l, m_t, *args) for l in legs]
+    dp_max = max(base)
+    D = pl.D_feed / 1000.0
+    v = m_t / (rho * math.pi * D * D / 4.0)
+    dm = pl.jump_thick / 1000.0
+    out = []
+    for l, b in zip(legs, base):
+        gap = dp_max - b
+        C2 = 2.0 * gap / (rho * v * v * dm) if gap > 0 else 0.0
+        l.jump_C2 = C2
+        out.append({"id": l.cid, "dp_base_kPa": b / 1000.0,
+                    "dp_jump_kPa": gap / 1000.0, "C2_1perm": C2})
+    return {"m_target_gs": m_t * 1000.0, "v_feed_ms": v,
+            "dp_target_kPa": dp_max / 1000.0, "jump_thick_mm": pl.jump_thick,
+            "rows": out}
+
+
+# ══════════════════════════════════════════════════════════════════
+#  회로 → 가지
+# ══════════════════════════════════════════════════════════════════
+def legs_from_circuits(p: FTHXParams, cs: CQC.CircuitSet,
+                       pl: PlenumSpec) -> List[Leg]:
+    rep = CQC.build(p, cs)
+    xy = CQC.tube_xy(p)
+    z0, z1 = CQC.z_ends(p)
+    inl = {q["circuit"]: q for q in rep["ports"] if q["kind"] == "inlet"}
+    legs = []
+    for c in rep["summary"]["circuits"]:
+        q = inl[c["id"]]
+        t = q["tube"]
+        zp = (z0 - pl.offset) if q["end"] == "z0" else (z1 + pl.offset)
+        xp = p.core_bbox[0] + pl.x_off
+        L_feed = math.hypot(xy[t][0] - xp,
+                            (z0 if q["end"] == "z0" else z1) - zp)
+        legs.append(Leg(cid=c["id"], L_path=c["path_mm"],
+                        n_bend=c["n_bend"], L_feed=L_feed))
+    return legs
