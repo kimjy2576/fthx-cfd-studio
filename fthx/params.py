@@ -58,6 +58,11 @@ class FinSpec(BaseModel):
         """핀 피치 [mm]"""
         return MM_PER_INCH / self.FPI
 
+    def D_collar(self, Do: float) -> float:
+        """핀 칼라 외경 D_c = Do + 2·t_f.
+           Wang(2000)·Chang&Wang 등 공기측 상관식은 전부 이 직경 기준으로 정의됨."""
+        return Do + 2.0 * self.t_f
+
     @model_validator(mode="after")
     def _check(self):
         if self.t_f >= self.Fp:
@@ -89,6 +94,39 @@ class DuctSpec(BaseModel):
         return self.gap_y <= 0 and self.gap_z <= 0
 
 
+class AirSide(BaseModel):
+    """공기측 운전 조건 (SETUP 입력)."""
+    V_face: float = Field(2.0, gt=0, description="전면 풍속 [m/s]")
+    T_in: float = Field(27.0, description="입구 건구온도 [°C]")
+    RH_in: float = Field(50.0, ge=0, le=100, description="입구 상대습도 [%]")
+    P_in: float = Field(101325.0, gt=0, description="입구 절대압 [Pa]")
+
+
+class RefSide(BaseModel):
+    """냉매측 운전 조건."""
+    fluid: str = "R410A"
+    mode: Literal["evaporator", "condenser"] = "evaporator"
+    m_total: float = Field(0.030, gt=0, description="총 질량유량 [kg/s]")
+    T_sat_in: float = Field(7.0, description="입구 포화온도 [°C]")
+    quality_in: Optional[float] = Field(None, ge=0, le=1,
+        description="입구 건도. None → 단상(과열/과냉)으로 취급")
+    superheat_out: Optional[float] = Field(5.0, ge=0, description="출구 과열도 [K]")
+    subcool_out: Optional[float] = Field(None, ge=0, description="출구 과냉도 [K]")
+
+
+class ThermalSpec(BaseModel):
+    """열 모델 선택. SETUP 단계만 영향하고 형상·메시는 불변."""
+    model: Literal["none", "equilibrium", "netm"] = "equilibrium"
+    contact_R: float = Field(0.0, ge=0,
+        description="핀-관 접촉 열저항 [m²K/W]. 확관 성형 접촉면")
+
+
+class Operating(BaseModel):
+    air: AirSide = Field(default_factory=AirSide)
+    ref: RefSide = Field(default_factory=RefSide)
+    thermal: ThermalSpec = Field(default_factory=ThermalSpec)
+
+
 class ExportSpec(BaseModel):
     """STEP 내보내기 옵션."""
     unit: Literal["MM", "CM", "M", "INCH"] = "MM"
@@ -110,12 +148,14 @@ class DomainSpec(BaseModel):
 
 
 class FTHXParams(BaseModel):
+    schema_version: Literal["fthx/1"] = "fthx/1"
     name: str = "fthx_case"
     tube: TubeSpec = Field(default_factory=TubeSpec)
     fin: FinSpec = Field(default_factory=FinSpec)
     domain: DomainSpec = Field(default_factory=DomainSpec)
     duct: DuctSpec = Field(default_factory=DuctSpec)
     export: ExportSpec = Field(default_factory=ExportSpec)
+    operating: Operating = Field(default_factory=Operating)
     bend: BendSpec = Field(default_factory=BendSpec)
 
     # ---------- 형상 배치 ----------
@@ -205,24 +245,30 @@ class FTHXParams(BaseModel):
         n_tube = t.Nr * t.Nt
         N_fin = math.floor(L / f.Fp)
 
+        Dc = f.D_collar(t.Do)                    # 공기측 특성 직경 (핀 칼라)
+
         A_front = H * L
-        A_c = (H - t.Nt * t.Do) * (L - N_fin * f.t_f)          # 최소유동면적
+        A_c = (H - t.Nt * Dc) * (L - N_fin * f.t_f)            # 최소유동면적
+        A_tube_o = n_tube * math.pi * Dc * (L - N_fin * f.t_f)  # 핀 사이 노출 칼라
+        A_fin = 2.0 * N_fin * (W * H - n_tube * math.pi * Dc ** 2 / 4.0)
+        A_o = A_tube_o + A_fin
         sigma = A_c / A_front
 
-        A_tube_o = n_tube * math.pi * t.Do * (L - N_fin * f.t_f)
-        A_fin = 2.0 * N_fin * (W * H - n_tube * math.pi * t.Do ** 2 / 4.0)
-        A_o = A_tube_o + A_fin
-
+        # 존 체적은 CAD 가 실제로 Do 로 잘라내므로 Do 기준을 유지해야 함
         V_box = W * H * L
         V_tube = n_tube * math.pi * t.Do ** 2 / 4.0 * L
-        V_zone = V_box - V_tube                                  # 포러스 존 체적
-        V_fin_solid = N_fin * f.t_f * (W * H - n_tube * math.pi * t.Do ** 2 / 4.0)
+        V_zone = V_box - V_tube
+        # 핀 고체 = 플레이트(구멍 Dc) + 칼라 애뉼러스(Do→Dc, 팩 전장)
+        V_fin_plate = N_fin * f.t_f * (W * H - n_tube * math.pi * Dc ** 2 / 4.0)
+        V_collar = n_tube * math.pi * (Dc ** 2 - t.Do ** 2) / 4.0 * L
+        V_fin_solid = V_fin_plate + V_collar
 
         return {
             "Fp_mm": f.Fp,
             "N_fin": N_fin,
             "L_fin_mm": L, "L_tube_mm": t.L, "edge_y_mm": b["edge_y"],
             "bare_tube_mm": t.L - L,
+            "D_c_mm": Dc,
             "A_front_mm2": A_front,
             "A_min_mm2": A_c,
             "sigma": sigma,
@@ -231,6 +277,7 @@ class FTHXParams(BaseModel):
             "D_h_mm": 4.0 * A_c * W / A_o,
             "V_zone_mm3": V_zone,
             "porosity_gamma": 1.0 - V_fin_solid / V_zone,
+            "V_fin_plate_mm3": V_fin_plate, "V_collar_mm3": V_collar,
             "a_v_1perm": (A_o / V_zone) * 1000.0,               # [1/m]
             "A_o_over_A_c": A_o / A_c,
             **self._bypass_metrics(H, L),
@@ -255,6 +302,42 @@ class FTHXParams(BaseModel):
             out["Dh_bypass_z_mm"] = 4 * (d.gap_z * H) / (2 * (d.gap_z + H))
         out["bypass_depth_mm"] = W
         return out
+
+    # ---------- 운전 조건 파생량 ----------
+    def air_props(self) -> dict:
+        """습공기 물성. CoolProp 없으면 건공기 이상기체로 근사."""
+        a = self.operating.air
+        T = a.T_in + 273.15
+        try:
+            import CoolProp.CoolProp as CP
+            v = CP.HAPropsSI("Vha", "T", T, "P", a.P_in, "R", a.RH_in / 100.0)
+            return {"rho": 1.0 / v, "mu": CP.HAPropsSI("mu", "T", T, "P", a.P_in, "R", a.RH_in / 100.0),
+                    "cp": CP.HAPropsSI("cp_ha", "T", T, "P", a.P_in, "R", a.RH_in / 100.0),
+                    "W": CP.HAPropsSI("W", "T", T, "P", a.P_in, "R", a.RH_in / 100.0),
+                    "source": "CoolProp/HAPropsSI"}
+        except Exception:
+            rho = a.P_in / (287.058 * T)
+            mu = 1.458e-6 * T ** 1.5 / (T + 110.4)          # Sutherland
+            return {"rho": rho, "mu": mu, "cp": 1006.0, "W": 0.0, "source": "dry-air ideal"}
+
+    def operating_derived(self) -> dict:
+        """SETUP·MESH 가 필요로 하는 운전 파생량. Wang 정의(D_c, G_max) 기준."""
+        d, a = self.derived(), self.operating.air
+        pr = self.air_props()
+        A_front = d["A_front_mm2"] / 1e6                     # m²
+        m_air = pr["rho"] * a.V_face * A_front               # kg/s
+        G_max = pr["rho"] * a.V_face / d["sigma"]            # kg/m²s
+        u_max = a.V_face / d["sigma"]
+        Dc = d["D_c_mm"] / 1e3
+        return {"air": {**pr, "A_front_m2": A_front, "m_dot_kgs": m_air,
+                        "u_max_ms": u_max, "G_max": G_max,
+                        "Re_Dc": G_max * Dc / pr["mu"],
+                        "Re_Dh": G_max * d["D_h_mm"] / 1e3 / pr["mu"]},
+                "ref": {"fluid": self.operating.ref.fluid,
+                        "mode": self.operating.ref.mode,
+                        "m_total_kgs": self.operating.ref.m_total,
+                        "T_sat_in_C": self.operating.ref.T_sat_in},
+                "thermal": self.operating.thermal.model}
 
     # ---------- HX-Sim 연동 ----------
     @classmethod

@@ -251,8 +251,11 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
     # ---- 메타데이터 (메시 저널이 좌표로 면을 집게 함) ----
     yc, zc = (dk["y0"] + dk["y1"]) / 2, (dk["z0"] + dk["z1"]) / 2
     meta = {
+        "schema_version": p.schema_version,
         "name": p.name,
         "units": "mm",
+        "operating": p.operating.model_dump(),
+        "operating_derived": p.operating_derived(),
         "params": p.model_dump(),
         "derived": p.derived(),
         "ft_spec_SI": p.to_ft_spec(),

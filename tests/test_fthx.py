@@ -27,13 +27,17 @@ def p():
 
 # ─────────────────────────── 파라미터 · 파생량 ───────────────────────────
 def test_derived_matches_reference(p):
-    """Wang 정의 파생량 기준값 (GUI 의 JS 구현과 일치해야 하는 값)"""
+    """Wang 정의 파생량 기준값 (GUI 의 JS 구현과 일치해야 하는 값).
+       공기측은 핀 칼라 직경 D_c = Do + 2·t_f 기준.
+       존 체적은 CAD 가 Do 로 잘라내므로 Do 기준 유지."""
     d = p.derived()
-    assert d["porosity_gamma"] == pytest.approx(0.93675, abs=1e-6)
-    assert d["sigma"] == pytest.approx(0.5996970236, abs=1e-9)
-    assert d["a_v_1perm"] == pytest.approx(1154.836862, abs=1e-5)
-    assert d["D_h_mm"] == pytest.approx(2.366565245, abs=1e-8)
+    assert d["D_c_mm"] == pytest.approx(9.75, abs=1e-9)
+    assert d["porosity_gamma"] == pytest.approx(0.9303675826, abs=1e-9)
+    assert d["sigma"] == pytest.approx(0.5915539370, abs=1e-9)
+    assert d["a_v_1perm"] == pytest.approx(1148.667003, abs=1e-5)
+    assert d["D_h_mm"] == pytest.approx(2.3469694164, abs=1e-9)
     assert d["N_fin"] == 275
+    assert d["V_collar_mm3"] == pytest.approx(83543.1168, rel=1e-9)
 
 
 def test_invalid_geometry_rejected():
@@ -214,7 +218,7 @@ def test_fin_pack_defaults_are_backward_compatible(p):
     assert (b["z0"], b["z1"]) == (0.0, p.tube.L)
     assert b["L_fin"] == p.tube.L
     assert p.derived()["N_fin"] == 275
-    assert p.derived()["sigma"] == pytest.approx(0.5996970236, abs=1e-9)
+    assert p.derived()["sigma"] == pytest.approx(0.5915539370, abs=1e-9)
 
 
 def test_fin_pack_scales_extensive_only():
@@ -232,7 +236,32 @@ def test_fin_pack_scales_extensive_only():
 def test_fin_height_independent():
     a = FTHXParams(fin={"FPI": 14, "t_f": 0.115, "edge_y": 8.0})
     assert (a.fin_pack["y1"] - a.fin_pack["y0"]) == pytest.approx(308.1, abs=0.05)
-    assert a.derived()["sigma"] == pytest.approx(0.589414, abs=1e-5)
+    assert a.derived()["sigma"] == pytest.approx(0.581022152, abs=1e-8)
+
+
+def test_operating_block_and_schema_version(p):
+    assert p.schema_version == "fthx/1"
+    o = p.operating_derived()
+    assert o["air"]["rho"] == pytest.approx(1.1686, abs=1e-3)
+    assert 300 < o["air"]["Re_Dc"] < 5000          # Wang 상관식 적용 범위
+    assert o["air"]["u_max_ms"] == pytest.approx(
+        p.operating.air.V_face / p.derived()["sigma"], rel=1e-12)
+    assert o["thermal"] == "equilibrium"
+
+
+def test_air_props_fallback_without_coolprop(p, monkeypatch):
+    import builtins
+    real = builtins.__import__
+
+    def fake(name, *a, **k):
+        if name.startswith("CoolProp"):
+            raise ImportError
+        return real(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake)
+    pr = p.air_props()
+    assert pr["source"] == "dry-air ideal"
+    assert 1.0 < pr["rho"] < 1.3
 
 
 @pytest.mark.parametrize("kw", [{"L_fin": 600}, {"L_fin": 440, "z_center": 100},

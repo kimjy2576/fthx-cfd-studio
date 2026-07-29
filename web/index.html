@@ -325,6 +325,9 @@ const P = {
   h_base:2.0, n_prism:5,
   // 표시
   finDensity:4, N_d:10,
+  V_face:2.0, T_air:27, RH_air:50,
+  ref_fluid:"R410A", ref_mode:"evaporator", m_total:0.030, T_sat:7,
+  thermal:"equilibrium",
   show:{tube:true, fin:true, bend:true, air:true, core:true, ref:true, byp:true}
 };
 
@@ -376,14 +379,17 @@ function derived(){
   const b=bbox(), Fp=25.4/P.FPI;
   const W=b.x1-b.x0, H=b.y1-b.y0, L=b.z1-b.z0;   // L = 핀 팩 길이
   const n=P.Nr*P.Nt, Nf=Math.floor(L/Fp);
+  const Dc=P.Do+2*P.t_f;                          // 핀 칼라 = 공기측 특성 직경
   const A_front=H*L;
-  const A_c=(H-P.Nt*P.Do)*(L-Nf*P.t_f);
-  const A_tube=n*Math.PI*P.Do*(L-Nf*P.t_f);
-  const A_fin=2*Nf*(W*H - n*Math.PI*P.Do**2/4);
+  const A_c=(H-P.Nt*Dc)*(L-Nf*P.t_f);
+  const A_tube=n*Math.PI*Dc*(L-Nf*P.t_f);
+  const A_fin=2*Nf*(W*H - n*Math.PI*Dc**2/4);
   const A_o=A_tube+A_fin;
+  // 존 체적은 CAD 가 Do 로 잘라내므로 Do 기준 유지
   const V_box=W*H*L, V_tube=n*Math.PI*P.Do**2/4*L, V_zone=V_box-V_tube;
-  const V_fin=Nf*P.t_f*(W*H - n*Math.PI*P.Do**2/4);
-  return {Fp, N_fin:Nf, W,H,L, n_tube:n,
+  const V_fin=Nf*P.t_f*(W*H - n*Math.PI*Dc**2/4)
+            + n*Math.PI*(Dc*Dc-P.Do*P.Do)/4*L;    // 플레이트 + 칼라
+  return {Fp, N_fin:Nf, W,H,L, n_tube:n, D_c:Dc,
     A_front, A_min:A_c, sigma:A_c/A_front, A_o, A_fin_frac:A_fin/A_o,
     D_h:4*A_c*W/A_o, V_zone, gamma:1-V_fin/V_zone, a_v:(A_o/V_zone)*1000,
     Ao_Ac:A_o/A_c, ...bypassMetrics(H,L)};
@@ -773,6 +779,13 @@ const GROUPS = [
    {k:"split_core_by_row",l:"코어 열별 분할",type:"chk"}],
   note:"공기측과 달리 관내는 근사 없이 형상 그대로 해상함. 단상에서는 완전발달 유동이라 CFD가 새로 알려주는 게 적고, 값어치는 관벽 온도분포(conjugate)에 있음. 2상으로 가면 관내는 1D 세그먼트(HX-Sim)로 넘기는 게 맞음."},
 
+ {t:"운전 조건", sub:"SETUP 입력", cols:2, f:[
+   {k:"V_face",l:"전면 풍속",u:"m/s",s:0.1},{k:"T_air",l:"공기 입구온도",u:"°C",s:0.5},
+   {k:"RH_air",l:"상대습도",u:"%",s:1},{k:"T_sat",l:"냉매 포화온도",u:"°C",s:0.5},
+   {k:"m_total",l:"냉매 총유량",u:"kg/s",s:0.001},
+   {k:"ref_mode",l:"운전 모드",type:"sel",o:["evaporator","condenser"]},
+   {k:"thermal",l:"열 모델",type:"sel",o:["none","equilibrium","netm"],span:2}]},
+
  {t:"메시 개략 추정", sub:"참고값", cols:2, f:[
    {k:"h_base",l:"기준 셀 크기",u:"mm",s:.1},{k:"n_prism",l:"프리즘 층수",u:"ea",s:1,int:1}]},
 
@@ -1047,6 +1060,12 @@ addEventListener("resize",()=>{resize();frame(false);});
 const fmt=(v,n=1)=>v.toLocaleString("ko-KR",{minimumFractionDigits:n,maximumFractionDigits:n});
 const big=v=> v>=1e6 ? (v/1e6).toFixed(2)+" M" : v>=1e3 ? (v/1e3).toFixed(0)+" k" : Math.round(v);
 
+/* 건공기 이상기체 근사 (Sutherland) — 서버는 CoolProp 습공기 사용 */
+function airProps(){ const T=(P.T_air||27)+273.15, Pa=101325;
+  return {rho:Pa/(287.058*T), mu:1.458e-6*Math.pow(T,1.5)/(T+110.4)}; }
+function reDc(){ const d=derived(), a=airProps();
+  return a.rho*(P.V_face||2)/d.sigma*(d.D_c/1e3)/a.mu; }
+
 function paint(){
   const d=derived(), Z=zones();
   document.getElementById("hudR").innerHTML=`
@@ -1057,7 +1076,8 @@ function paint(){
     <div>공극률 γ <b>${d.gamma.toFixed(4)}</b></div>
     <div>최소유동비 σ <b>${d.sigma.toFixed(4)}</b></div>
     <div>면적밀도 a<sub>v</sub> <b>${fmt(d.a_v,0)}</b> 1/m</div>
-    <div>수력직경 D<sub>h</sub> <b>${fmt(d.D_h,2)}</b> mm</div>`;
+    <div>수력직경 D<sub>h</sub> <b>${fmt(d.D_h,2)}</b> mm</div>
+    <div>칼라경 D<sub>c</sub> <b>${fmt(d.D_c,2)}</b> mm · Re<sub>Dc</sub> <b>${fmt(reDc(),0)}</b></div>`;
 
   document.getElementById("zoneSummary").textContent =
     `총 ${fmt(P.L_up+d.W+P.L_down,0)} mm · 존 ${Z.list.length}개 · 개략 ${big(Z.total)} 셀 (프리즘 ${big(Z.prism)} 포함)`;
@@ -1176,14 +1196,18 @@ document.getElementById("btnStlRef").onclick=()=>{
 function caseDoc(){
   const b=bbox(), d=derived(), Z=zones();
   const out={
+    schema_version:"fthx/1",
     name:P.name, units:"mm",
+    operating:{air:{V_face:P.V_face,T_in:P.T_air,RH_in:P.RH_air,P_in:101325},
+               ref:{fluid:P.ref_fluid,mode:P.ref_mode,m_total:P.m_total,T_sat_in:P.T_sat},
+               thermal:{model:P.thermal,contact_R:0}},
     tube:{Do:P.Do,Di:P.Di,L:P.L,Nr:P.Nr,Nt:P.Nt,Pt:P.Pt,Pl:P.Pl,layout:P.layout,k_tube:386},
     fin:{FPI:P.FPI,t_f:P.t_f,fin_type:P.fin_type,k_fin:205,L_fin:P.L_fin,edge_y:P.edge_y},
     duct:{gap_y:P.gap_y,gap_z:P.gap_z},
     bend:{R_over_D:P.R_over_D||null,leg:P.bend_leg||0},
     domain:{L_up:P.L_up,L_down:P.L_down,split_core_by_row:P.split_core_by_row,
             include_tube_fluid:P.include_tube_fluid,include_bends:P.include_bends,bend_gap:8},
-    derived:{Fp_mm:d.Fp,N_fin:d.N_fin,sigma:d.sigma,porosity_gamma:d.gamma,
+    derived:{Fp_mm:d.Fp,N_fin:d.N_fin,D_c_mm:d.D_c,sigma:d.sigma,porosity_gamma:d.gamma,
              a_v_1perm:d.a_v,D_h_mm:d.D_h,A_o_mm2:d.A_o,V_zone_mm3:d.V_zone,
              A_o_over_A_c:d.Ao_Ac,n_tube:d.n_tube},
     ft_spec_SI:{Nr:P.Nr,Nt:P.Nt,N_seg:5,Di:P.Di/1000,Do:P.Do/1000,
