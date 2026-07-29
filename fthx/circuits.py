@@ -85,8 +85,8 @@ def rc(p: FTHXParams, tid: int) -> Tuple[int, int]:
 
 
 def z_ends(p: FTHXParams) -> Tuple[float, float]:
-    b = p.core_bbox
-    return b[4], b[5]
+    """벤드가 붙는 곳 = 핀 팩 끝이 아니라 관 끝단."""
+    return p.tube_z
 
 
 # ══════════════════════════════════════════════════════════════════

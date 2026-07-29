@@ -24,7 +24,7 @@ from fthx import FTHXParams, circuits as CQC, distributor as DST
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 
-app = FastAPI(title="FT-HX CFD Studio", version="0.4.0")
+app = FastAPI(title="FT-HX CFD Studio", version="0.5.0")
 
 
 # ══════════════════════════════════════════════════════════════════

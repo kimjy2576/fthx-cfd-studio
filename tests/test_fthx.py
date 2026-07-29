@@ -205,3 +205,56 @@ def test_plenum_connects_every_circuit(p):
             f = f.fuse(q)
         assert len(f.clean().Solids()) == 1
     assert len(meta["plenum"]["jumps"]) == len(cs.circuits)
+
+
+# ─────────────────────────── 핀 팩 분리 (v0.5.0) ───────────────────────────
+def test_fin_pack_defaults_are_backward_compatible(p):
+    """기본값은 기존 동작(핀이 관 전장을 채움)을 정확히 재현해야 함"""
+    b = p.fin_pack
+    assert (b["z0"], b["z1"]) == (0.0, p.tube.L)
+    assert b["L_fin"] == p.tube.L
+    assert p.derived()["N_fin"] == 275
+    assert p.derived()["sigma"] == pytest.approx(0.5996970236, abs=1e-9)
+
+
+def test_fin_pack_scales_extensive_only():
+    """핀 팩을 줄이면 크기량만 줄고 세기량(σ, D_h, a_v, γ)은 불변"""
+    a = FTHXParams().derived()
+    b = FTHXParams(fin={"FPI": 14, "t_f": 0.115, "L_fin": 440}).derived()
+    r = 440.0 / 500.0
+    for k in ("N_fin", "A_front_mm2", "A_o_mm2", "V_zone_mm3"):
+        assert b[k] == pytest.approx(a[k] * r, rel=1e-6)
+    for k in ("sigma", "D_h_mm", "a_v_1perm", "porosity_gamma"):
+        assert b[k] == pytest.approx(a[k], rel=1e-12)
+    assert b["bare_tube_mm"] == pytest.approx(60.0)
+
+
+def test_fin_height_independent():
+    a = FTHXParams(fin={"FPI": 14, "t_f": 0.115, "edge_y": 8.0})
+    assert (a.fin_pack["y1"] - a.fin_pack["y0"]) == pytest.approx(308.1, abs=0.05)
+    assert a.derived()["sigma"] == pytest.approx(0.589414, abs=1e-5)
+
+
+@pytest.mark.parametrize("kw", [{"L_fin": 600}, {"L_fin": 440, "z_center": 100},
+                                {"edge_y": 4.0}])
+def test_fin_pack_validators(kw):
+    with pytest.raises(ValueError):
+        FTHXParams(fin=dict({"FPI": 14, "t_f": 0.115}, **kw))
+
+
+@needs_cad
+def test_tubes_extend_beyond_fin_pack():
+    """관은 핀 팩 밖까지 나가고, 벤드는 관 끝단에 붙어야 함"""
+    p = FTHXParams(fin={"FPI": 14, "t_f": 0.115, "L_fin": 440})
+    cs = CQC.gen_face_split(p, 4)
+    assy, meta = CAD.build(p, cs)
+    B = {c.name: c.obj for c in assy.children}
+    tb = B["solid_tube_r01t01"].BoundingBox()
+    assert (tb.zmin, tb.zmax) == pytest.approx((0.0, p.tube.L), abs=1e-6)
+    cb = B["fluid_air_core_r01"].BoundingBox()
+    assert (cb.zmin, cb.zmax) == pytest.approx((30.0, 470.0), abs=1e-6)
+    ub = B["fluid_air_up"].BoundingBox()
+    assert (ub.zmin, ub.zmax) == pytest.approx((cb.zmin, cb.zmax), abs=1e-6)
+    core = sum(v.Volume() for k, v in B.items() if k.startswith("fluid_air_core"))
+    assert core == pytest.approx(p.derived()["V_zone_mm3"], rel=1e-9)
+    assert all(q["seed"][2] in (0.0, p.tube.L) for q in meta["circuits"]["ports"])

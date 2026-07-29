@@ -317,7 +317,7 @@ const P = {
   // 관
   Do:9.52, Di:8.22, L:500, Nr:4, Nt:12, Pt:25.4, Pl:22.0, layout:"staggered",
   // 핀
-  FPI:14, t_f:0.115, fin_type:"plain",
+  FPI:14, t_f:0.115, fin_type:"plain", L_fin:500, edge_y:12.7,
   // 도메인
   L_up:100, L_down:200, autoExt:true,
   include_bends:true, include_tube_fluid:true, split_core_by_row:true,
@@ -329,8 +329,8 @@ const P = {
 };
 
 const PRESETS = {
-  evap:{Do:9.52,Di:8.22,L:500,Nr:2,Nt:14,Pt:25.4,Pl:22.0,FPI:10,t_f:0.115,layout:"staggered",fin_type:"louver"},
-  cond:{Do:7.94,Di:7.10,L:600,Nr:4,Nt:16,Pt:21.0,Pl:18.2,FPI:18,t_f:0.100,layout:"staggered",fin_type:"wavy"}
+  evap:{Do:9.52,Di:8.22,L:500,L_fin:470,edge_y:12.7,Nr:2,Nt:14,Pt:25.4,Pl:22.0,FPI:10,t_f:0.115,layout:"staggered",fin_type:"louver"},
+  cond:{Do:7.94,Di:7.10,L:600,L_fin:560,edge_y:10.5,Nr:4,Nt:16,Pt:21.0,Pl:18.2,FPI:18,t_f:0.100,layout:"staggered",fin_type:"wavy"}
 };
 
 /* ---------- 형상 배치 ---------- */
@@ -343,10 +343,14 @@ const centers = () => {
   }
   return out;
 };
+/* 핀 팩(= 포러스 코어) 범위. 관 배열과 독립 */
 const bbox = () => {
   const ys = centers().map(c=>c.y);
-  return {x0:0, x1:P.Nr*P.Pl, y0:Math.min(...ys)-P.Pt/2, y1:Math.max(...ys)+P.Pt/2, z0:0, z1:P.L};
+  const Lf = Math.min(P.L_fin||P.L, P.L), e = P.edge_y || P.Pt/2, zc = P.L/2;
+  return {x0:0, x1:P.Nr*P.Pl, y0:Math.min(...ys)-e, y1:Math.max(...ys)+e,
+          z0:zc-Lf/2, z1:zc+Lf/2};
 };
+const tubeZ = () => [0, P.L];          // 벤드가 붙는 곳
 
 /* ---------- 검증 ---------- */
 function validate(){
@@ -355,6 +359,8 @@ function validate(){
   if(P.Pt<=P.Do) e.push("Pt ≤ Do — 횡방향 간섭");
   if(P.Pl<=P.Do) e.push("Pl ≤ Do — 종방향 간섭");
   if(P.layout==="staggered" && Math.hypot(P.Pl,P.Pt/2)<=P.Do) e.push("대각 피치 ≤ Do — 엇갈림 배열 간섭");
+  if((P.L_fin||P.L) > P.L) e.push("L_fin > 관 길이");
+  if((P.edge_y||P.Pt/2) <= P.Do/2) e.push("edge_y ≤ Do/2 — 핀이 관을 못 덮음");
   const Fp = 25.4/P.FPI;
   if(P.t_f>=Fp) e.push(`t_f ≥ Fp(${Fp.toFixed(3)}) — 핀 겹침`);
   return e;
@@ -363,7 +369,7 @@ function validate(){
 /* ---------- 파생량 (Wang 정의, fthx_params.derived() 와 동일) ---------- */
 function derived(){
   const b=bbox(), Fp=25.4/P.FPI;
-  const W=b.x1-b.x0, H=b.y1-b.y0, L=b.z1-b.z0;
+  const W=b.x1-b.x0, H=b.y1-b.y0, L=b.z1-b.z0;   // L = 핀 팩 길이
   const n=P.Nr*P.Nt, Nf=Math.floor(L/Fp);
   const A_front=H*L;
   const A_c=(H-P.Nt*P.Do)*(L-Nf*P.t_f);
@@ -380,7 +386,7 @@ function derived(){
 
 /* ---------- 냉매 도메인 (관내 실형상 해상) ---------- */
 function refDerived(){
-  const A=Math.PI*P.Di*P.Di/4, B0=bbox(), Ls=B0.z1-B0.z0;
+  const A=Math.PI*P.Di*P.Di/4, TZ=tubeZ(), Ls=TZ[1]-TZ[0];  // 냉매는 관 전장
   const nStr=nTube(), bends=CIRC.bends;
   const V_str=nStr*Ls*A;
   const V_bend=bends.reduce((s,b)=>s+(Math.PI*b.R+2*b.standoff)*A,0);
@@ -495,7 +501,7 @@ function deriveBends(){
 /* 스텁 + 반원 호 + 스텁 폴리라인 (flat [x,y,z,...]) */
 function bendPoly(bd,nArc){
   nArc=nArc||25; const xy=XY(), B0=bbox(), A=xy[bd.a], Bp=xy[bd.b];
-  const s=bd.end==="z1"?1:-1, ze=bd.end==="z1"?B0.z1:B0.z0, zs=ze+s*bd.standoff;
+  const TZ=tubeZ(), s=bd.end==="z1"?1:-1, ze=bd.end==="z1"?TZ[1]:TZ[0], zs=ze+s*bd.standoff;
   const ct=Math.cos(bd.th), st=Math.sin(bd.th), p=[];
   const ns=bd.standoff>0?Math.max(2,Math.ceil(bd.standoff/3)):0;
   for(let j=0;j<ns;j++){const z=ze+(zs-ze)*j/(ns-1); p.push(A.x,A.y,z);}
@@ -577,8 +583,9 @@ function ioPorts(){
     const n=ck.tubes.length, ie=ck.inlet_end;
     const oe = ((n-1)%2===0) ? ie : (ie==="z0"?"z1":"z0");
     [["inlet",ck.tubes[0],ie],["outlet",ck.tubes[n-1],oe]].forEach(([kind,t,e])=>{
+      const TZ=tubeZ();
       if(xy[t]) out.push({name:`ref_${kind}_${ck.id}`, circuit:ck.id, kind, tube:t,
-        rc:rcOf(t), end:e, seed:[xy[t].x, xy[t].y, e==="z0"?B0.z0:B0.z1]});
+        rc:rcOf(t), end:e, seed:[xy[t].x, xy[t].y, e==="z0"?TZ[0]:TZ[1]]});
     });
   });
   return out;
@@ -589,7 +596,7 @@ function analyzeCircuits(){
   const bends=deriveBends();
   const so=resolveStandoff(bends);
   const v=validateCircuits(bends);
-  const B0=bbox(), Ls=B0.z1-B0.z0, A=Math.PI*P.Di*P.Di/4;
+  const TZ=tubeZ(), Ls=TZ[1]-TZ[0], A=Math.PI*P.Di*P.Di/4;
   const rows=CIRC.list.map((ck,idx)=>{
     const bs=bends.filter(b=>b.c===ck.id);
     const path=ck.tubes.length*Ls + bs.reduce((s,b)=>s+Math.PI*b.R+2*b.standoff,0);
@@ -724,7 +731,8 @@ const GROUPS = [
 
  {t:"핀 (Fin)", sub:"형상 생성 안 함 · 포러스 처리", cols:2, f:[
    {k:"FPI",l:"핀 밀도",u:"1/in",s:.5},{k:"t_f",l:"핀 두께",u:"mm",s:.005},
-   {k:"fin_type",l:"핀 형상",type:"sel",o:["plain","wavy","louver","slit"],span:2}],
+   {k:"fin_type",l:"핀 형상",type:"sel",o:["plain","wavy","louver","slit"],span:2},
+   {k:"L_fin",l:"핀 팩 길이",u:"mm",s:5},{k:"edge_y",l:"핀 가장자리 여유",u:"mm",s:0.5}],
   note:"핀은 CFD 형상으로 만들지 않음. 코어 존을 포러스로 두고 블로키지를 공극률 γ로 넘김. 아래 3D의 핀은 확인용 표시일 뿐 해석 도메인이 아님."},
 
  {t:"유동 도메인", sub:"자동 생성", cols:2, f:[
@@ -853,16 +861,18 @@ function boxMesh(x0,x1,y0,y1,z0,z1,mat,emat){
 function rebuild(){
   reconcileCircuits();
   Object.values(G).forEach(clearGroup);
-  const b=bbox(), C=centers(), d=derived(), xy=XY();
+  const b=bbox(), C=centers(), d=derived(), xy=XY(), TZ0=tubeZ();
   const ext = 0;
   const zLen = (b.z1-b.z0) + 2*ext;
 
   // --- 관 ---
-  const tg=new THREE.CylinderGeometry(P.Do/2,P.Do/2,zLen,26,1,false);
+  const zLenT=(TZ0[1]-TZ0[0])+2*ext;
+  const tg=new THREE.CylinderGeometry(P.Do/2,P.Do/2,zLenT,26,1,false);
   tg.rotateX(Math.PI/2);
   const im=new THREE.InstancedMesh(tg,M.copper,C.length);
   const mtx=new THREE.Matrix4();
-  C.forEach((c,i)=>{ mtx.makeTranslation(c.x,c.y,(b.z0+b.z1)/2); im.setMatrixAt(i,mtx); });
+  const TZ=tubeZ();
+  C.forEach((c,i)=>{ mtx.makeTranslation(c.x,c.y,(TZ[0]+TZ[1])/2); im.setMatrixAt(i,mtx); });
   im.instanceMatrix.needsUpdate=true; G.tube.add(im);
 
   // --- 핀 (표시 전용) ---
@@ -880,17 +890,17 @@ function rebuild(){
 
   // --- 냉매 도메인: 직관부 ---
   if(P.include_tube_fluid){
-    const rg=new THREE.CylinderGeometry(P.Di/2,P.Di/2,zLen,22,1,false);
+    const rg=new THREE.CylinderGeometry(P.Di/2,P.Di/2,zLenT,22,1,false);
     rg.rotateX(Math.PI/2);
     const rim=new THREE.InstancedMesh(rg,M.ref,C.length);
-    C.forEach((c,i)=>{ mtx.makeTranslation(c.x,c.y,(b.z0+b.z1)/2); rim.setMatrixAt(i,mtx); });
+    C.forEach((c,i)=>{ mtx.makeTranslation(c.x,c.y,(TZ0[0]+TZ0[1])/2); rim.setMatrixAt(i,mtx); });
     rim.instanceMatrix.needsUpdate=true; G.ref.add(rim);
   }
 
   // --- 리턴 벤드 (회로 기반, 임의 관 쌍) ---
   CIRC.bends.forEach(bd=>{
     const sgn = bd.end==="z1" ? 1 : -1;
-    const ze  = bd.end==="z1" ? b.z1 : b.z0, zs = ze + sgn*bd.standoff;
+    const ze  = bd.end==="z1" ? TZ0[1] : TZ0[0], zs = ze + sgn*bd.standoff;
     const put=(rad,mat,grp)=>{
       const g=new THREE.TorusGeometry(bd.R,rad,14,30,Math.PI);
       g.rotateX(sgn>0?Math.PI/2:-Math.PI/2);     // 끝점 ±X, 볼록 ±Z
@@ -943,9 +953,9 @@ function fullBox(){
   return {x0:b.x0-P.L_up, x1:b.x1+P.L_down, y0:b.y0, y1:b.y1, z0:b.z0, z1:b.z1};
 }
 function coreBox(){
-  const b=bbox();
+  const b=bbox(), TZ=tubeZ();
   const e=P.include_bends? (CIRC.rep.standoff.max_protrusion_mm||P.Pt/2)+8 : 0;
-  return {x0:b.x0, x1:b.x1, y0:b.y0, y1:b.y1, z0:b.z0-e, z1:b.z1+e};
+  return {x0:b.x0, x1:b.x1, y0:b.y0, y1:b.y1, z0:TZ[0]-e, z1:TZ[1]+e};
 }
 function camBasis(){
   const z=new THREE.Vector3(Math.sin(sph.ph)*Math.sin(sph.th),
@@ -1144,7 +1154,7 @@ function caseDoc(){
   const out={
     name:P.name, units:"mm",
     tube:{Do:P.Do,Di:P.Di,L:P.L,Nr:P.Nr,Nt:P.Nt,Pt:P.Pt,Pl:P.Pl,layout:P.layout,k_tube:386},
-    fin:{FPI:P.FPI,t_f:P.t_f,fin_type:P.fin_type,k_fin:205},
+    fin:{FPI:P.FPI,t_f:P.t_f,fin_type:P.fin_type,k_fin:205,L_fin:P.L_fin,edge_y:P.edge_y},
     domain:{L_up:P.L_up,L_down:P.L_down,split_core_by_row:P.split_core_by_row,
             include_tube_fluid:P.include_tube_fluid,include_bends:P.include_bends,bend_gap:8},
     derived:{Fp_mm:d.Fp,N_fin:d.N_fin,sigma:d.sigma,porosity_gamma:d.gamma,

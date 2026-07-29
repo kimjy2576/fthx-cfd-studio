@@ -2,6 +2,6 @@
 from .params import FTHXParams, TubeSpec, FinSpec, DomainSpec
 from . import circuits, distributor
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __all__ = ["FTHXParams", "TubeSpec", "FinSpec", "DomainSpec",
            "circuits", "distributor", "cad"]

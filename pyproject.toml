@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fthx-cfd-studio"
-version = "0.4.0"
+version = "0.5.0"
 description = "핀-튜브 열교환기 3D 해석 전용 형상·회로 설계 도구"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -49,7 +49,8 @@ def _half_torus(R, r, cx, cy, z, th, up: bool):
 def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
           plenum: "DST.PlenumSpec | None" = None) -> tuple[cq.Assembly, dict]:
     t, f, d = p.tube, p.fin, p.domain
-    x0, x1, y0, y1, z0, z1 = p.core_bbox
+    x0, x1, y0, y1, z0, z1 = p.core_bbox      # 핀 팩(포러스 코어)
+    tz_lo, tz_hi = p.tube_z                   # 관 실제 범위
     centers = p.tube_centers()
     n_tube = t.Nr * t.Nt
 
@@ -72,8 +73,8 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
         tgt = e1 if bd.end == "z1" else e0
         tgt[bd.a] = max(tgt[bd.a], bd.standoff)
         tgt[bd.b] = max(tgt[bd.b], bd.standoff)
-    zr = [(z0 - e0[i], z1 + e1[i]) for i in range(n_tube)]
-    tz0, tz1 = z0 - max(e0), z1 + max(e1)
+    zr = [(tz_lo - e0[i], tz_hi + e1[i]) for i in range(n_tube)]
+    tz0, tz1 = tz_lo - max(e0), tz_hi + max(e1)
 
     outer_by_row = {
         r: cq.Compound.makeCompound(
@@ -117,7 +118,7 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
     xy = {r * t.Nt + i: (x, y) for (r, i, x, y) in centers}
     for bd in bends:
         up = (bd.end == "z1")
-        zs = (z1 + bd.standoff) if up else (z0 - bd.standoff)
+        zs = (tz_hi + bd.standoff) if up else (tz_lo - bd.standoff)
         tag = f"{bd.circuit}_k{bd.k:02d}"
         th = math.atan2(xy[bd.b][1] - xy[bd.a][1], xy[bd.b][0] - xy[bd.a][0])
         o = _half_torus(bd.R, t.Do / 2, *bd.center_xy, zs, th, up)
@@ -138,7 +139,7 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
             xs = [xy[q["tube"]][0] for q in lst]
             ys = [xy[q["tube"]][1] for q in lst]
             xp = sum(xs) / len(xs)
-            zc = z0 if end == "z0" else z1
+            zc = tz_lo if end == "z0" else tz_hi
             sgn = -1.0 if end == "z0" else 1.0
             zp = zc + sgn * plenum.offset
             Dp = max(plenum.D_plenum, (max(xs) - min(xs)) + plenum.D_feed + 4.0)
@@ -183,6 +184,8 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
         "derived": p.derived(),
         "ft_spec_SI": p.to_ft_spec(),
         "core_bbox": {"x": [x0, x1], "y": [y0, y1], "z": [z0, z1]},
+        "fin_pack": p.fin_pack,
+        "tube_z": [tz_lo, tz_hi],
         "face_seeds": {
             "air_inlet":  [x0 - d.L_up, yc, zc],
             "air_outlet": [x1 + d.L_down, yc, zc],

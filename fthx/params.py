@@ -5,7 +5,7 @@ HX-Sim ft_spec (Nr, Nt, Di, Do, Pt, Pl, FPI, fin_type) 과 1:1 호환.
 from __future__ import annotations
 
 import math
-from typing import List, Literal, Tuple
+from typing import List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -43,6 +43,15 @@ class FinSpec(BaseModel):
     t_f: float = Field(0.115, gt=0, description="핀 두께 [mm]")
     fin_type: Literal["plain", "wavy", "louver", "slit"] = "plain"
     k_fin: float = Field(205.0, gt=0, description="핀 열전도율 [W/m-K]")
+
+    # ── 핀 팩 치수 (관 배열과 독립) ─────────────────────────────
+    # None 이면 기존 동작 그대로: 핀이 관 전장을 채우고, 높이는 반피치
+    L_fin: Optional[float] = Field(None, gt=0,
+        description="핀 팩 길이(z) [mm]. None → 관 길이와 동일")
+    z_center: Optional[float] = Field(None,
+        description="핀 팩 z 중심 [mm]. None → 관 중앙")
+    edge_y: Optional[float] = Field(None, gt=0,
+        description="최외곽 관 중심 ~ 핀 가장자리 [mm]. None → Pt/2")
 
     @property
     def Fp(self) -> float:
@@ -84,19 +93,46 @@ class FTHXParams(BaseModel):
         return out
 
     @property
-    def core_bbox(self):
-        """코어 박스 (x0,x1,y0,y1,z0,z1). 최외곽 관에서 반피치 여유."""
-        t = self.tube
+    def tube_z(self) -> Tuple[float, float]:
+        """관 자체의 z 범위. 벤드는 여기에 붙음."""
+        return 0.0, self.tube.L
+
+    @property
+    def fin_pack(self) -> dict:
+        """핀 팩(= 포러스 코어 존)의 실제 범위. 관 배열과 독립."""
+        t, f = self.tube, self.fin
+        Lf = f.L_fin if f.L_fin is not None else t.L
+        zc = f.z_center if f.z_center is not None else t.L / 2.0
+        e = f.edge_y if f.edge_y is not None else t.Pt / 2.0
         ys = [c[3] for c in self.tube_centers()]
-        return (0.0, t.Nr * t.Pl,
-                min(ys) - t.Pt / 2.0, max(ys) + t.Pt / 2.0,
-                0.0, t.L)
+        return {"x0": 0.0, "x1": t.Nr * t.Pl,
+                "y0": min(ys) - e, "y1": max(ys) + e,
+                "z0": zc - Lf / 2.0, "z1": zc + Lf / 2.0,
+                "L_fin": Lf, "edge_y": e, "z_center": zc}
+
+    @property
+    def core_bbox(self):
+        """포러스 코어 박스 (x0,x1,y0,y1,z0,z1) — 핀 팩과 동일."""
+        b = self.fin_pack
+        return (b["x0"], b["x1"], b["y0"], b["y1"], b["z0"], b["z1"])
+
+    @model_validator(mode="after")
+    def _check_fin_pack(self):
+        b = self.fin_pack
+        if b["L_fin"] > self.tube.L + 1e-9:
+            raise ValueError(f"L_fin({b['L_fin']}) > 관 길이({self.tube.L})")
+        if b["z0"] < -1e-9 or b["z1"] > self.tube.L + 1e-9:
+            raise ValueError(f"핀 팩이 관 밖으로 나감: z {b['z0']:.1f}~{b['z1']:.1f} "
+                             f"(관 0~{self.tube.L})")
+        if b["edge_y"] <= self.tube.Do / 2:
+            raise ValueError(f"edge_y({b['edge_y']}) ≤ Do/2 — 핀이 관을 못 덮음")
+        return self
 
     # ---------- closure 입력용 파생량 (Wang 정의) ----------
     def derived(self) -> dict:
         t, f = self.tube, self.fin
-        x0, x1, y0, y1, z0, z1 = self.core_bbox
-        W, H, L = x1 - x0, y1 - y0, z1 - z0          # 깊이, 높이, 관길이
+        b = self.fin_pack
+        W, H, L = b["x1"] - b["x0"], b["y1"] - b["y0"], b["L_fin"]   # 깊이·높이·핀팩길이
         n_tube = t.Nr * t.Nt
         N_fin = math.floor(L / f.Fp)
 
@@ -116,6 +152,8 @@ class FTHXParams(BaseModel):
         return {
             "Fp_mm": f.Fp,
             "N_fin": N_fin,
+            "L_fin_mm": L, "L_tube_mm": t.L, "edge_y_mm": b["edge_y"],
+            "bare_tube_mm": t.L - L,
             "A_front_mm2": A_front,
             "A_min_mm2": A_c,
             "sigma": sigma,
