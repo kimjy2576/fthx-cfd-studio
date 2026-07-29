@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -19,12 +21,13 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import fthx
 from fthx import FTHXParams, circuits as CQC, distributor as DST
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 
-app = FastAPI(title="FT-HX CFD Studio", version="0.5.0")
+app = FastAPI(title="FT-HX CFD Studio", version=fthx.__version__)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -90,6 +93,85 @@ class ExportIn(BaseModel):
 # ══════════════════════════════════════════════════════════════════
 #  API
 # ══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════
+#  앱 업데이트 (git pull)
+# ══════════════════════════════════════════════════════════════════
+def _git(*args: str, timeout: int = 60) -> tuple[int, str, str]:
+    """git 실행. 인증 프롬프트로 멈추지 않게 GIT_TERMINAL_PROMPT=0."""
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_ASKPASS="echo",
+               LC_ALL="C.UTF-8")
+    try:
+        r = subprocess.run(["git", *args], cwd=str(ROOT), env=env,
+                           capture_output=True, text=True, timeout=timeout)
+        return r.returncode, r.stdout.strip(), r.stderr.strip()
+    except FileNotFoundError:
+        return 127, "", "git 실행 파일을 찾을 수 없음"
+    except subprocess.TimeoutExpired:
+        return 124, "", f"git {' '.join(args)} 시간 초과({timeout}s)"
+
+
+def _git_state() -> dict:
+    ok, head, _ = _git("rev-parse", "--short", "HEAD")
+    if ok != 0:
+        return {"is_repo": False}
+    _, branch, _ = _git("rev-parse", "--abbrev-ref", "HEAD")
+    _, dirty, _ = _git("status", "--porcelain")
+    _, subj, _ = _git("log", "-1", "--pretty=%s")
+    rc, upstream, _ = _git("rev-parse", "--abbrev-ref", "@{u}")
+    return {"is_repo": True, "commit": head, "branch": branch,
+            "subject": subj, "upstream": upstream if rc == 0 else None,
+            "dirty": [l for l in dirty.splitlines() if l][:20],
+            "reload_mode": os.environ.get("FTHX_RELOAD") == "1"}
+
+
+@app.get("/api/version")
+def version():
+    return {"version": app.version, "git": _git_state()}
+
+
+@app.post("/api/update")
+def update():
+    """git pull --ff-only 로 최신 코드를 받아옴.
+
+    - 로컬 수정이 있으면 덮어쓰지 않고 거부함
+    - --ff-only 라 병합 충돌이 생기지 않음
+    - 파이썬 모듈은 이미 임포트돼 있어 코드 변경은 서버 재시작이 필요함
+      (python run.py --reload 로 띄웠으면 자동 재시작됨)
+    """
+    st = _git_state()
+    if not st.get("is_repo"):
+        raise HTTPException(400, "git 저장소가 아님 — zip 으로 받은 경우 업데이트 불가")
+    if st["upstream"] is None:
+        raise HTTPException(400, f"'{st['branch']}' 에 추적 원격이 없음 "
+                                 "(git branch --set-upstream-to=origin/main)")
+    if st["dirty"]:
+        raise HTTPException(409, {"message": "로컬 수정 사항이 있어 중단함 "
+                                             "(덮어쓰지 않음). 커밋하거나 되돌린 뒤 재시도",
+                                  "dirty": st["dirty"]})
+
+    rc, _, err = _git("fetch", "--quiet")
+    if rc != 0:
+        raise HTTPException(502, f"fetch 실패 (인증·네트워크 확인): {err[:300]}")
+
+    _, behind, _ = _git("rev-list", "--count", "HEAD..@{u}")
+    if behind == "0":
+        return {"updated": False, "message": "이미 최신 버전임",
+                "before": st["commit"], "after": st["commit"], "git": _git_state()}
+
+    _, log, _ = _git("log", "--oneline", "HEAD..@{u}")
+    rc, out, err = _git("pull", "--ff-only")
+    if rc != 0:
+        raise HTTPException(500, f"pull 실패: {(err or out)[:300]}")
+
+    after = _git_state()
+    return {"updated": True, "behind": int(behind),
+            "message": f"{behind}개 커밋 적용됨",
+            "commits": log.splitlines()[:20],
+            "before": st["commit"], "after": after["commit"],
+            "restart_required": not after["reload_mode"],
+            "git": after}
+
+
 @app.get("/api/health")
 def health():
     try:

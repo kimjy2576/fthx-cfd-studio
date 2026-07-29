@@ -13,6 +13,9 @@ def main():
     ap.add_argument("--no-browser", action="store_true")
     a = ap.parse_args()
 
+    import os
+    if a.reload:
+        os.environ["FTHX_RELOAD"] = "1"
     import uvicorn
     url = f"http://{a.host}:{a.port}"
     print(f"\n  FT-HX CFD Studio  →  {url}\n  (Ctrl+C 로 종료)\n")

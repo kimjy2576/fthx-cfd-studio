@@ -181,6 +181,25 @@ canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%}
 .ruler span{flex:1;border-left:1px solid var(--line);padding-left:4px}
 .ruler span:last-child{text-align:right;border-right:1px solid var(--line);padding-right:4px}
 
+/* ───────── 토스트 ───────── */
+.toast{position:fixed;right:18px;bottom:18px;z-index:60;width:380px;max-width:calc(100vw - 36px);
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:0 12px 36px rgba(15,48,85,.22);overflow:hidden}
+.toast[hidden]{display:none}
+.toast .thead{display:flex;align-items:center;gap:10px;padding:10px 13px;
+  border-bottom:1px solid var(--line2);background:linear-gradient(180deg,#fff,#F4F9FE)}
+.toast .thead b{flex:1;font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--blue-d)}
+.toast .thead button{border:0;background:transparent;color:var(--dim);font-size:13px;cursor:pointer}
+.toast .tbody{padding:11px 13px;font-size:11.5px;line-height:1.7;max-height:46vh;overflow:auto}
+.toast .tbody code{font-family:var(--mono);font-size:10.5px;background:var(--tint);
+  padding:1px 5px;border-radius:4px}
+.toast .tbody ul{margin:6px 0 0 16px}
+.toast .tbody li{font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+.toast.bad{border-color:var(--bad)}
+.toast.bad .thead{background:linear-gradient(180deg,#FDECEA,#FBDDD9)}
+.toast.bad .thead b{color:#9E2B1E}
+
 /* ───────── 회로 설계 모달 ───────── */
 .modal{position:fixed;inset:0;background:rgba(10,35,60,.42);backdrop-filter:blur(3px);
   display:flex;align-items:center;justify-content:center;z-index:50;padding:22px}
@@ -236,6 +255,7 @@ canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%}
     <button class="chip" data-preset="cond">응축기 프리셋</button>
   </div>
   <div class="spacer"></div>
+  <button class="act" id="btnUpd" title="확인 중…">앱 업데이트</button>
   <button class="act" id="btnCirc">회로 설계</button>
   <div class="hfit"><span>뷰 맞춤</span>
     <div class="seg hseg" id="fitSeg">
@@ -278,6 +298,11 @@ canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%}
     </div>
   </section>
 </main>
+
+<div class="toast" id="toast" hidden>
+  <div class="thead"><b id="tTitle"></b><button id="tClose">✕</button></div>
+  <div class="tbody" id="tBody"></div>
+</div>
 
 <div class="modal" id="ceModal" hidden>
  <div class="mcard">
@@ -1296,6 +1321,54 @@ function refresh(geo){
   } else paint();
 }
 function fit(){ frame(true); }
+/* ---- 앱 업데이트 (git pull) ---- */
+const T=document.getElementById("toast");
+document.getElementById("tClose").onclick=()=>T.hidden=true;
+function toast(title,html,bad){
+  document.getElementById("tTitle").textContent=title;
+  document.getElementById("tBody").innerHTML=html;
+  T.className="toast"+(bad?" bad":""); T.hidden=false;
+}
+const btnU=document.getElementById("btnUpd");
+let GIT=null;
+fetch("/api/version").then(r=>r.json()).then(v=>{
+  GIT=v.git;
+  if(!GIT||!GIT.is_repo){ btnU.disabled=true;
+    btnU.title="git 저장소가 아님 (zip 설치는 업데이트 불가)"; return; }
+  btnU.title=`v${v.version} · ${GIT.branch} @ ${GIT.commit}`
+           + (GIT.reload_mode?" · 자동 재시작 켜짐":"");
+}).catch(()=>{ btnU.disabled=true; btnU.title="로컬 서버 없음 — python run.py"; });
+
+btnU.onclick=async()=>{
+  const old=btnU.textContent; btnU.textContent="확인 중…"; btnU.disabled=true;
+  try{
+    const r=await fetch("/api/update",{method:"POST"});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){
+      const d=j.detail;
+      if(d&&d.dirty) toast("업데이트 중단",
+        `<b>${d.message}</b><ul>${d.dirty.map(x=>`<li>${x}</li>`).join("")}</ul>`,true);
+      else toast("업데이트 실패", String((d&&d.message)||d||r.statusText), true);
+      return;
+    }
+    if(!j.updated){ toast("앱 업데이트",
+      `이미 최신 버전임 · <code>${j.after}</code>`); return; }
+    const list=(j.commits||[]).map(c=>`<li>${c}</li>`).join("");
+    toast("업데이트 완료",
+      `<b>${j.message}</b><br><code>${j.before}</code> → <code>${j.after}</code>`
+      + (list?`<ul>${list}</ul>`:"")
+      + (j.restart_required
+          ? `<br><br>파이썬 모듈은 이미 로드돼 있어 <b>서버 재시작이 필요함</b>.`
+            + ` <code>Ctrl+C</code> 후 <code>python run.py</code>.`
+            + ` 다음부터 <code>--reload</code> 로 띄우면 자동 재시작됨.`
+            + `<br><br>웹 화면만 먼저 새로고침하려면 아래 버튼.`
+            + ` <button class="act" style="margin-top:6px" onclick="location.reload()">새로고침</button>`
+          : `<br><br>자동 재시작 모드임. 3초 후 새로고침함.`));
+    if(!j.restart_required) setTimeout(()=>location.reload(),3000);
+  }catch(e){ toast("업데이트 실패", String(e.message||e), true); }
+  finally{ btnU.textContent=old; btnU.disabled=false; }
+};
+
 document.getElementById("btnCirc").onclick=ceOpen;
 document.getElementById("ceClose").onclick=ceClose;
 addEventListener("keydown",e=>{if(e.key==="Escape")ceClose();});
