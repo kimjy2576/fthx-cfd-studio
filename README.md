@@ -31,7 +31,15 @@
 
 ## 빠른 시작
 
-### Windows (PowerShell) — 처음 한 번
+### Windows — 가장 쉬운 방법
+
+**`run.bat` 을 더블클릭**하면 끝임. 가상환경 생성 → 의존성 설치 → 서버 실행을
+자동으로 하고, 브라우저가 열림. 종료는 `Ctrl+C`.
+
+포트를 바꾸려면 명령창에서 `run.bat --port 8021` 처럼 인자를 넘기면 됨.
+macOS / Linux 는 `./run.sh`.
+
+### Windows (PowerShell) — 수동 설치
 
 아래 블록을 통째로 복사해 붙여넣으면 됨.
 
