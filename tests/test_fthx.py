@@ -539,3 +539,38 @@ def test_stub_auto_satisfies_criterion(p, crit, flag):
     _, m = CAD.build(p, CQC.gen_face_split(p, 4),
                      DST.PlenumSpec(stub_auto=True, stub_criterion=crit))
     assert m["plenum"]["stub_development"][flag] is True
+
+
+# ─────────────────── 냉매 입출구 관 연장 (v0.6.0) ───────────────────
+@needs_cad
+def test_port_stub_extends_only_port_tubes():
+    q = FTHXParams(domain={"include_bends": True, "include_tube_fluid": True,
+                           "port_stub": 250})
+    cs = CQC.gen_face_split(q, 4)
+    assy, m = CAD.build(q, cs)
+    B = {c.name: c.obj for c in assy.children}
+    assert m["port_stub"]["len_mm"] == pytest.approx(250)
+    assert sorted({round(p["seed"][2], 1) for p in m["circuits"]["ports"]}) == [-250.0, 750.0]
+    t0 = cs.circuits[0].tubes[0]
+    r0, i0 = divmod(t0, q.tube.Nt)
+    bb = B[f"solid_tube_r{r0+1:02d}t{i0+1:02d}"].BoundingBox()
+    assert bb.zmin == pytest.approx(-250, abs=1e-6)
+    # 회로 중간 관은 연장되지 않아야 함
+    tm = cs.circuits[0].tubes[len(cs.circuits[0].tubes) // 2]
+    rm, im = divmod(tm, q.tube.Nt)
+    bm = B[f"solid_tube_r{rm+1:02d}t{im+1:02d}"].BoundingBox()
+    assert bm.zmin >= -1e-6 and bm.zmax <= q.tube.L + 1e-6
+
+
+@needs_cad
+@needs_cp
+@pytest.mark.parametrize("crit,mult", [("practical", 10.0), ("full", None)])
+def test_port_stub_auto(crit, mult):
+    q = FTHXParams(domain={"include_bends": True, "include_tube_fluid": True,
+                           "port_stub_auto": True, "port_stub_criterion": crit})
+    _, m = CAD.build(q, CQC.gen_face_split(q, 4))
+    e = m["port_stub"]
+    need = mult * q.tube.Di if mult else e["Le_mm"]
+    assert e["len_mm"] >= need - 1e-9
+    assert sorted({round(p["seed"][2], 1) for p in m["circuits"]["ports"]}) == \
+        [-e["len_mm"], q.tube.L + e["len_mm"]]

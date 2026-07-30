@@ -185,8 +185,11 @@ def derive_bends(p: FTHXParams, cs: CircuitSet) -> List[Bend]:
 
 
 def io_ports(p: FTHXParams, cs: CircuitSet) -> List[dict]:
-    """회로별 입·출구 포트 (Fluent 경계 이름 + face seed 좌표)"""
+    """회로별 입·출구 포트 (Fluent 경계 이름 + face seed 좌표).
+       port_stub 만큼 관이 연장되면 경계면도 그만큼 밀려남."""
     xy, (z0, z1) = tube_xy(p), z_ends(p)
+    ps = p.domain.port_stub
+    z0, z1 = z0 - ps, z1 + ps
     ports = []
     for ck in cs.circuits:
         n = len(ck.tubes)

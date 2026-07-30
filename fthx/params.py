@@ -141,6 +141,11 @@ class DomainSpec(BaseModel):
     split_core_by_row: bool = Field(True, description="포러스 코어를 열별로 분할")
     include_tube_fluid: bool = Field(True, description="관내 냉매 체적 생성")
     include_bends: bool = Field(False, description="U-bend(리턴벤드) 생성")
+    port_stub: float = Field(0.0, ge=0,
+        description="냉매 입·출구 관 연장 [mm]. 경계조건을 코일에서 떼고 "
+                    "유동 발달 구간을 확보함. 상류 시스템은 모델하지 않음")
+    port_stub_auto: bool = Field(False, description="발달 길이만큼 자동 확보")
+    port_stub_criterion: Literal["full", "practical"] = "practical"
     symmetry: Literal["none", "z"] = Field("none",
         description="z 중앙면 대칭 반쪽 모델. 공기측 스크리닝 전용 "
                     "(벤드·관내 냉매가 없어야 성립)")

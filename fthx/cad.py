@@ -104,6 +104,23 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
         tgt = e1 if bd.end == "z1" else e0
         tgt[bd.a] = max(tgt[bd.a], bd.standoff)
         tgt[bd.b] = max(tgt[bd.b], bd.standoff)
+    # 냉매 입·출구 관 연장 (경계조건을 코일에서 떼고 발달 구간 확보)
+    ps = d.port_stub
+    if d.port_stub_auto:
+        _rho, _mu = DST.Fluid(p.operating.ref.fluid,
+                              p.operating.ref.T_sat_in, 1.0).props()
+        _nc = max(1, len(cs.circuits))
+        _e = DST.entry_length(t.Di, p.operating.ref.m_total / _nc, _rho, _mu)
+        _need = _e["Le_mm"] if d.port_stub_criterion == "full" else 10.0 * t.Di
+        ps = max(ps, math.ceil(_need))
+    if ps > 0:
+        for prt in rep["ports"]:
+            tgt = e1 if prt["end"] == "z1" else e0
+            tgt[prt["tube"]] = max(tgt[prt["tube"]], ps)
+    # seed 는 절대값으로 덮어씀 (io_ports 는 선언값만 알고 자동 해소값을 모름)
+    for prt in rep["ports"]:
+        prt["seed"][2] = (tz_lo - ps) if prt["end"] == "z0" else (tz_hi + ps)
+
     zr = [(tz_lo - e0[i], tz_hi + e1[i]) for i in range(n_tube)]
     tz0, tz1 = tz_lo - max(e0), tz_hi + max(e1)
 
@@ -292,6 +309,16 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
         "symmetry": meta_sym,
         "duct_box": dk,
         "tube_z": [tz_lo, tz_hi],
+        "port_stub": {
+            "len_mm": ps,
+            **(lambda rho_mu: {
+                "per_circuit_kgs": p.operating.ref.m_total / max(1, len(cs.circuits)),
+                **DST.entry_length(t.Di,
+                    p.operating.ref.m_total / max(1, len(cs.circuits)),
+                    *rho_mu),
+                "Le_practical_mm": round(10.0 * t.Di, 1),
+            })(DST.Fluid(p.operating.ref.fluid,
+                         p.operating.ref.T_sat_in, 1.0).props())},
         "face_seeds": {
             "air_inlet":  [x0 - d.L_up, yc, zc],
             "air_outlet": [x1 + d.L_down, yc, zc],
