@@ -1375,7 +1375,15 @@ btnU.onclick=async()=>{
       const dt=j.detail;
       if(dt&&dt.dirty) toast("업데이트 중단",
         `<b>${dt.message}</b><ul>${dt.dirty.map(x=>`<li>${x}</li>`).join("")}</ul>`,true);
-      else toast("업데이트 실패", String((dt&&dt.message)||dt||r.statusText), true);
+      else if(dt&&typeof dt==="object"){
+        let h=`<b>${dt.message||"오류"}</b>`;
+        if(dt.returncode!==undefined) h+=`<br>exit code <code>${dt.returncode}</code>`;
+        if(dt.ahead!==undefined) h+=`<br>로컬 ${dt.ahead}개 앞 · 원격 ${dt.behind}개 뒤`;
+        if(dt.stderr) h+=`<br><br><code>${dt.stderr.replace(/[<>&]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]))}</code>`;
+        if(dt.trace) h+=`<br><br><code>${dt.trace.slice(-300).replace(/[<>&]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]))}</code>`;
+        toast("업데이트 실패", h, true);
+      }
+      else toast("업데이트 실패", String(dt||r.statusText), true);
       return;
     }
     if(!j.updated){ toast("앱 업데이트",

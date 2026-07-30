@@ -97,17 +97,27 @@ class ExportIn(BaseModel):
 #  앱 업데이트 (git pull)
 # ══════════════════════════════════════════════════════════════════
 def _git(*args: str, timeout: int = 60) -> tuple[int, str, str]:
-    """git 실행. 인증 프롬프트로 멈추지 않게 GIT_TERMINAL_PROMPT=0."""
-    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_ASKPASS="echo",
-               LC_ALL="C.UTF-8")
+    """git 실행.
+
+    · GIT_TERMINAL_PROMPT=0 : 인증 프롬프트에서 멈추지 않게
+    · encoding='utf-8', errors='replace' : 한글 커밋 메시지가 있을 때
+      Windows 기본 로케일(cp949)로 디코드하다 UnicodeDecodeError 로
+      500 이 나던 문제를 막음. text=True 만 쓰면 로케일에 좌우됨.
+    """
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", LC_ALL="C.UTF-8",
+               GIT_OPTIONAL_LOCKS="0")
+    env.pop("GIT_ASKPASS", None)          # Windows 에서 echo 는 실행파일이 아님
     try:
         r = subprocess.run(["git", *args], cwd=str(ROOT), env=env,
-                           capture_output=True, text=True, timeout=timeout)
-        return r.returncode, r.stdout.strip(), r.stderr.strip()
+                           capture_output=True, timeout=timeout,
+                           encoding="utf-8", errors="replace")
+        return r.returncode, (r.stdout or "").strip(), (r.stderr or "").strip()
     except FileNotFoundError:
-        return 127, "", "git 실행 파일을 찾을 수 없음"
+        return 127, "", "git 실행 파일을 찾을 수 없음 (PATH 확인)"
     except subprocess.TimeoutExpired:
         return 124, "", f"git {' '.join(args)} 시간 초과({timeout}s)"
+    except Exception as e:                # 예상 못 한 것도 500 대신 메시지로
+        return 1, "", f"{type(e).__name__}: {e}"
 
 
 def _git_state() -> dict:
@@ -130,7 +140,7 @@ def version():
 
 
 @app.post("/api/update")
-def update():
+def update():  # noqa: C901
     """git pull --ff-only 로 최신 코드를 받아옴.
 
     - 로컬 수정이 있으면 덮어쓰지 않고 거부함
@@ -138,6 +148,17 @@ def update():
     - 파이썬 모듈은 이미 임포트돼 있어 코드 변경은 서버 재시작이 필요함
       (python run.py --reload 로 띄웠으면 자동 재시작됨)
     """
+    try:
+        return _do_update()
+    except HTTPException:
+        raise
+    except Exception as e:                # 예상 못 한 예외를 구조화해 반환
+        import traceback
+        raise HTTPException(500, {"message": f"{type(e).__name__}: {e}",
+                                  "trace": traceback.format_exc()[-800:]})
+
+
+def _do_update():
     st = _git_state()
     if not st.get("is_repo"):
         raise HTTPException(400, "git 저장소가 아님 — zip 으로 받은 경우 업데이트 불가")
@@ -153,15 +174,23 @@ def update():
     if rc != 0:
         raise HTTPException(502, f"fetch 실패 (인증·네트워크 확인): {err[:300]}")
 
+    _, ahead, _ = _git("rev-list", "--count", "@{u}..HEAD")
     _, behind, _ = _git("rev-list", "--count", "HEAD..@{u}")
-    if behind == "0":
+    if ahead not in ("", "0") and behind not in ("", "0"):
+        raise HTTPException(409, {
+            "message": f"브랜치가 갈라졌음 (로컬 {ahead}개 앞, 원격 {behind}개 뒤) — "
+                       "fast-forward 불가. 로컬 커밋을 푸시하거나 되돌린 뒤 재시도",
+            "ahead": int(ahead), "behind": int(behind)})
+    if behind in ("", "0"):
         return {"updated": False, "message": "이미 최신 버전임",
                 "before": st["commit"], "after": st["commit"], "git": _git_state()}
 
     _, log, _ = _git("log", "--oneline", "HEAD..@{u}")
     rc, out, err = _git("pull", "--ff-only")
     if rc != 0:
-        raise HTTPException(500, f"pull 실패: {(err or out)[:300]}")
+        raise HTTPException(500, {"message": "git pull --ff-only 실패",
+                                  "returncode": rc,
+                                  "stderr": err[:600], "stdout": out[:600]})
 
     after = _git_state()
     return {"updated": True, "behind": int(behind),
