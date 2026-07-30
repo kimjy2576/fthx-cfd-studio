@@ -620,3 +620,40 @@ def test_reverse_subset_only(p):
     rv = CQC.apply_reverse(cs, ["c02"])
     assert rv.circuits[0].tubes == cs.circuits[0].tubes
     assert rv.circuits[1].tubes == list(reversed(cs.circuits[1].tubes))
+
+
+# ─────────────────── 프리셋 (튜토리얼 / 시험) ───────────────────
+def test_presets_are_valid():
+    from fthx import presets
+    for name, fn in presets.PRESETS.items():
+        p = fn()
+        assert p.schema_version == "fthx/1"
+        d = p.derived()
+        assert d["N_fin"] > 0 and 0 < d["porosity_gamma"] < 1
+
+
+@needs_cad
+def test_tutorial_has_five_bodies_and_opposite_ports():
+    from fthx import presets
+    p = presets.tutorial()
+    assy, m = CAD.build(p)
+    names = sorted(c.name for c in assy.children)
+    assert names == ["fluid_air_core_r01", "fluid_air_down", "fluid_air_up",
+                     "fluid_ref_r01t01", "solid_tube_r01t01"]
+    ends = {q["kind"]: q["end"] for q in m["circuits"]["ports"]}
+    assert ends["inlet"] != ends["outlet"]        # 관 1개 → 반대편
+    # 포러스 코어와 관벽이 원통면을 정확히 공유해야 함 (Share Topology 조건)
+    B = {c.name: c.obj for c in assy.children}
+    shared = [f1.Area() for f1 in B["solid_tube_r01t01"].Faces()
+              for f2 in B["fluid_air_core_r01"].Faces()
+              if abs(f1.Area() - f2.Area()) < 1e-6
+              and (f1.Center() - f2.Center()).Length < 1e-6]
+    assert shared, "포러스↔관벽 공유면 없음"
+
+
+@needs_cad
+def test_probe_has_thirteen_bodies():
+    from fthx import presets
+    p = presets.probe()
+    assy, _ = CAD.build(p, CQC.gen_single(p))
+    assert len(assy.children) == 13

@@ -256,6 +256,11 @@ canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%}
     <button class="chip" data-preset="cond">응축기 프리셋</button>
   </div>
   <div class="spacer"></div>
+  <div class="hfit"><span>튜토리얼</span>
+    <div class="seg hseg" id="tutSeg">
+      <button data-preset="tutorial" title="관 1개 · 5 바디 — 메싱 첫 시험용">관 1개</button>
+      <button data-preset="probe" title="관 3개 + 벤드 2개 · 13 바디">관 3개</button>
+    </div></div>
   <button class="act" id="btnUpd" title="확인 중…">앱 업데이트</button>
   <button class="act" id="btnCirc">회로 설계</button>
   <div class="hfit"><span>뷰 맞춤</span>
@@ -1419,6 +1424,33 @@ btnU.onclick=async()=>{
   }catch(e){ toast("업데이트 실패", String(e.message||e), true); }
   finally{ btnU.textContent=old; btnU.disabled=false; }
 };
+
+/* ---- 튜토리얼 STEP 다운로드 ---- */
+document.querySelectorAll("#tutSeg button").forEach(b=>b.onclick=async()=>{
+  const nm=b.dataset.preset, old=b.textContent;
+  b.textContent="생성 중…"; b.disabled=true;
+  try{
+    const r=await fetch(`/api/preset/${nm}/step`);
+    if(!r.ok){
+      const j=await r.json().catch(()=>({}));
+      toast("튜토리얼 STEP 실패",
+        String(j.detail||r.statusText)
+        + `<br><br>로컬 서버가 필요함. <code>run.bat</code> 또는 <code>./run.sh</code>`
+        + ` 로 띄운 뒤 <code>http://127.0.0.1:8020</code> 으로 접속할 것.`, true);
+      return;
+    }
+    save(await r.blob(), `${nm==="tutorial"?"tutorial_1tube":"probe_small"}.step`);
+    const info=nm==="tutorial"
+      ? "관 1개 · 5 바디<ul><li>fluid_air_up / core_r01 / down</li>"
+        +"<li>solid_tube_r01t01</li><li>fluid_ref_r01t01</li></ul>"
+        +"Fluent Meshing 임포트 시 <b>Length Unit = mm</b>,"
+        +" Describe Geometry 에서 <b>Share Topology = All</b>."
+      : "관 3개 + 벤드 2개 · 13 바디<br>비정형 벤드 메싱까지 확인용.";
+    toast("튜토리얼 STEP 내려받음", info);
+  }catch(e){ toast("튜토리얼 STEP 실패",
+      `로컬 서버에 연결되지 않음.<br><br><code>run.bat</code> 으로 띄울 것.`, true); }
+  finally{ b.textContent=old; b.disabled=false; }
+});
 
 document.getElementById("btnCirc").onclick=ceOpen;
 document.getElementById("ceClose").onclick=ceClose;

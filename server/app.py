@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import fthx
-from fthx import FTHXParams, circuits as CQC, distributor as DST
+from fthx import FTHXParams, circuits as CQC, distributor as DST, presets
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
@@ -295,6 +295,55 @@ def export_meta(req: ExportIn):
     pl = DST.PlenumSpec(**req.plenum) if req.with_plenum else None
     out = Path(tempfile.mkdtemp())
     meta = CAD.export(p, outdir=str(out), cs=cs, plenum=pl)
+    meta.pop("_files", None)
+    return JSONResponse(meta)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  튜토리얼 / 시험 케이스
+# ══════════════════════════════════════════════════════════════════
+PRESET_INFO = {
+    "tutorial": {"label": "튜토리얼 · 관 1개", "bodies": 5,
+                 "desc": "벤드 없음. 포러스↔관벽 conformal 접합과 얇은 관벽 "
+                         "메싱을 확인하는 최소 케이스"},
+    "probe":    {"label": "시험 · 관 3개", "bodies": 13,
+                 "desc": "단일 회로(벤드 2개). 비정형 벤드 메싱까지 확인"},
+}
+
+
+@app.get("/api/preset")
+def preset_list():
+    return {"presets": [{"name": k, **v} for k, v in PRESET_INFO.items()]}
+
+
+def _preset_case(name: str):
+    fn = presets.PRESETS.get(name)
+    if fn is None:
+        raise HTTPException(404, f"알 수 없는 프리셋: {name}")
+    p = fn()
+    cs = CQC.gen_single(p) if p.domain.include_bends else None
+    return p, cs
+
+
+@app.get("/api/preset/{name}/step")
+def preset_step(name: str):
+    try:
+        from fthx import cad as CAD
+    except Exception as e:
+        raise HTTPException(503, f"cadquery 미설치: {e}")
+    p, cs = _preset_case(name)
+    out = Path(tempfile.mkdtemp())
+    meta = CAD.export(p, outdir=str(out), cs=cs)
+    return FileResponse(meta["_files"]["step"], media_type="model/step",
+                        filename=f"{p.name}.step")
+
+
+@app.get("/api/preset/{name}/meta")
+def preset_meta(name: str):
+    from fthx import cad as CAD
+    p, cs = _preset_case(name)
+    out = Path(tempfile.mkdtemp())
+    meta = CAD.export(p, outdir=str(out), cs=cs)
     meta.pop("_files", None)
     return JSONResponse(meta)
 
