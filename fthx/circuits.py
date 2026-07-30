@@ -166,6 +166,31 @@ GENERATORS = {"row_serpentine": gen_row_serpentine, "face_split": gen_face_split
 
 
 # ══════════════════════════════════════════════════════════════════
+#  방향 반전
+# ══════════════════════════════════════════════════════════════════
+def outlet_end(inlet_end: str, n_tube: int) -> str:
+    """관 n 개를 지난 뒤 도달하는 끝단."""
+    return inlet_end if n_tube % 2 == 0 else ("z1" if inlet_end == "z0" else "z0")
+
+
+def reverse_circuit(ck: Circuit) -> Circuit:
+    """유동 방향만 뒤집음. 관 순서를 역으로 하고 입구 끝단을 기존 출구 끝단으로
+       바꾸면 **벤드 형상은 완전히 동일**하고 입출구만 맞바뀜.
+
+       근거: 벤드 k 의 끝단은 입구 끝단에서 k 번 뒤집은 것이므로,
+       역순 회로의 벤드 j 는 원래 벤드 n-j 와 같은 끝단에 놓임.
+    """
+    return Circuit(id=ck.id, tubes=list(reversed(ck.tubes)),
+                   inlet_end=outlet_end(ck.inlet_end, len(ck.tubes)),
+                   m_frac=ck.m_frac)
+
+
+def reverse_all(cs: CircuitSet) -> CircuitSet:
+    return CircuitSet(pattern=cs.pattern + "_rev",
+                      circuits=[reverse_circuit(c) for c in cs.circuits])
+
+
+# ══════════════════════════════════════════════════════════════════
 #  벤드 도출
 # ══════════════════════════════════════════════════════════════════
 def derive_bends(p: FTHXParams, cs: CircuitSet) -> List[Bend]:
@@ -194,8 +219,9 @@ def io_ports(p: FTHXParams, cs: CircuitSet) -> List[dict]:
     for ck in cs.circuits:
         n = len(ck.tubes)
         in_end = ck.inlet_end
-        # n개 관을 지나면 끝단이 n-1번 바뀜
-        out_end = in_end if (n - 1) % 2 == 0 else ("z1" if in_end == "z0" else "z0")
+        # 관 하나를 지날 때마다 끝단이 뒤집힘 → n 개를 지나면 n 번 뒤집힘.
+        # (벤드 수 n-1 로 판정하면 단일 관에서 입·출구가 같은 면이 되어 모순)
+        out_end = in_end if n % 2 == 0 else ("z1" if in_end == "z0" else "z0")
         for kind, tid, e in (("inlet", ck.tubes[0], in_end),
                              ("outlet", ck.tubes[-1], out_end)):
             ports.append({"name": f"ref_{kind}_{ck.id}", "circuit": ck.id, "kind": kind,
@@ -351,6 +377,14 @@ def summarize(p: FTHXParams, cs: CircuitSet, bends: List[Bend]) -> dict:
             "path_mean_mm": float(L.mean()),
             "path_spread_pct": float((L.max() - L.min()) / L.mean() * 100),
             "V_total_cm3": float(sum(r["V_mm3"] for r in rows) / 1000)}
+
+
+def apply_reverse(cs: CircuitSet, which=None) -> CircuitSet:
+    """which=None 이면 전체, 아니면 회로 id 집합만 반전."""
+    ids = set(which) if which else None
+    return CircuitSet(pattern=cs.pattern,
+        circuits=[reverse_circuit(c) if (ids is None or c.id in ids) else c
+                  for c in cs.circuits])
 
 
 def build(p: FTHXParams, cs: CircuitSet, **kw) -> dict:

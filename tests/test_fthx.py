@@ -519,11 +519,15 @@ def test_stub_geometry_and_port_moves(p):
     assert y1 == pytest.approx(y0 - 160)                   # 입구면이 스터브 끝으로 이동
     assy, _ = CAD.build(p, cs, DST.PlenumSpec(stub_len=160))
     B = {c.name: c.obj for c in assy.children}
-    assert "fluid_stub_in_z0" in B and "fluid_stub_out_z1" in B
+    # 출구 끝단은 회로 관 수의 홀짝에 따라 달라지므로 이름을 고정하지 않음
+    stubs = sorted(k for k in B if k.startswith("fluid_stub_"))
+    assert any(k.startswith("fluid_stub_in_") for k in stubs)
+    assert any(k.startswith("fluid_stub_out_") for k in stubs)
     # 스터브 ↔ 플레넘 conformal
+    sin = next(k for k in stubs if k.startswith("fluid_stub_in_"))
     hits = []
-    for f1 in B["fluid_stub_in_z0"].Faces():
-        for f2 in B["fluid_plenum_in_z0"].Faces():
+    for f1 in B[sin].Faces():
+        for f2 in B[sin.replace("stub", "plenum")].Faces():
             c1, c2 = f1.Center(), f2.Center()
             if abs(f1.Area() - f2.Area()) < 1e-6 and max(
                     abs(c1.x - c2.x), abs(c1.y - c2.y), abs(c1.z - c2.z)) < 1e-6:
@@ -550,7 +554,8 @@ def test_port_stub_extends_only_port_tubes():
     assy, m = CAD.build(q, cs)
     B = {c.name: c.obj for c in assy.children}
     assert m["port_stub"]["len_mm"] == pytest.approx(250)
-    assert sorted({round(p["seed"][2], 1) for p in m["circuits"]["ports"]}) == [-250.0, 750.0]
+    # 회로당 관 12개(짝수) → 입·출구가 같은 끝단(z0)
+    assert sorted({round(p["seed"][2], 1) for p in m["circuits"]["ports"]}) == [-250.0]
     t0 = cs.circuits[0].tubes[0]
     r0, i0 = divmod(t0, q.tube.Nt)
     bb = B[f"solid_tube_r{r0+1:02d}t{i0+1:02d}"].BoundingBox()
@@ -572,5 +577,46 @@ def test_port_stub_auto(crit, mult):
     e = m["port_stub"]
     need = mult * q.tube.Di if mult else e["Le_mm"]
     assert e["len_mm"] >= need - 1e-9
-    assert sorted({round(p["seed"][2], 1) for p in m["circuits"]["ports"]}) == \
-        [-e["len_mm"], q.tube.L + e["len_mm"]]
+    assert sorted({round(p["seed"][2], 1) for p in m["circuits"]["ports"]}) == [-e["len_mm"]]
+
+
+# ─────────────────── 방향 반전 (v0.6.0) ───────────────────
+@pytest.mark.parametrize("n,exp", [(1, "z1"), (2, "z0"), (3, "z1"), (12, "z0")])
+def test_outlet_end_rule(n, exp):
+    """관 하나를 지날 때마다 끝단이 뒤집힘. 단일 관은 반드시 반대편."""
+    assert CQC.outlet_end("z0", n) == exp
+
+
+def test_single_tube_ports_are_on_opposite_ends(p):
+    cs = CQC.CircuitSet(circuits=[CQC.Circuit(id="c01", tubes=[0], inlet_end="z0")])
+    ends = {q["kind"]: q["end"] for q in CQC.io_ports(p, cs)}
+    assert ends["inlet"] != ends["outlet"]
+
+
+@pytest.mark.parametrize("gen", ["single", "row_serpentine", "face_split"])
+def test_reverse_preserves_bend_geometry_and_swaps_ports(p, gen):
+    cs = (CQC.gen_face_split(p, 4) if gen == "face_split"
+          else CQC.GENERATORS[gen](p))
+    rv = CQC.reverse_all(cs)
+    key = lambda b: (min(b.a, b.b), max(b.a, b.b), b.end, round(b.R, 9),
+                     round(b.straight, 9))
+    assert {key(b) for b in CQC.derive_bends(p, cs)} == \
+           {key(b) for b in CQC.derive_bends(p, rv)}
+    f = lambda ps, k: sorted((q["tube"], q["end"]) for q in ps if q["kind"] == k)
+    a, b = CQC.io_ports(p, cs), CQC.io_ports(p, rv)
+    assert f(a, "inlet") == f(b, "outlet") and f(a, "outlet") == f(b, "inlet")
+    assert CQC.build(p, rv)["ok"]
+
+
+def test_reverse_is_involutive(p):
+    cs = CQC.gen_face_split(p, 4)
+    back = CQC.reverse_all(CQC.reverse_all(cs))
+    assert [c.tubes for c in back.circuits] == [c.tubes for c in cs.circuits]
+    assert [c.inlet_end for c in back.circuits] == [c.inlet_end for c in cs.circuits]
+
+
+def test_reverse_subset_only(p):
+    cs = CQC.gen_face_split(p, 4)
+    rv = CQC.apply_reverse(cs, ["c02"])
+    assert rv.circuits[0].tubes == cs.circuits[0].tubes
+    assert rv.circuits[1].tubes == list(reversed(cs.circuits[1].tubes))

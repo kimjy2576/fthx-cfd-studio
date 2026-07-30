@@ -177,6 +177,17 @@ STEP은 **면** 이름을 싣지 못하므로, 경계 지정은 `case.json`의 `
 관 ID는 `tid = r * Nt + i`. **입구 끝단만 정하면 이후 벤드 끝단은 자동 교대**함
 (k 홀수 → z1, 짝수 → z0).
 
+출구 끝단은 관 하나를 지날 때마다 뒤집히므로 **관 수의 홀짝**으로 결정됨 —
+짝수면 입구와 같은 면, 홀수면 반대편. (단일 관은 반드시 반대편)
+
+### 방향 반전
+
+에디터의 회로별 `⇄` 또는 `⇄ 전체 방향 반전` 버튼. 관 순서를 역으로 하고
+입구 끝단을 기존 출구 끝단으로 바꾸므로 **벤드 형상은 완전히 동일**하고
+입출구만 맞바뀜. 두 번 누르면 원상복구됨.
+
+`face_split` 은 기본이 뒤 열 → 앞 열(대향류)이므로, 반전하면 병류가 됨.
+
 ### 자동 생성기
 
 | 패턴 | 회로 수 | 특징 |
@@ -235,6 +246,7 @@ $$\Delta p_{jump} = C_2 \cdot \tfrac{1}{2}\rho v^2 \cdot \Delta m
 | POST | `/api/update` | `git pull --ff-only` (로컬 수정 있으면 거부) |
 | POST | `/api/circuits/generate` | 패턴 자동 생성 + 검증 |
 | POST | `/api/circuits/validate` | 사용자 회로 검증 |
+| POST | `/api/circuits/reverse` | 유동 방향 반전 (전체 또는 일부) |
 | POST | `/api/distribution` | 분배 예측 + jump 계수 |
 | POST | `/api/export/step` | STEP 파일 |
 | POST | `/api/export/meta` | case.json (형상·회로·존·face_seeds) |

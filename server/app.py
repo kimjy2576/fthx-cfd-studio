@@ -69,6 +69,7 @@ class GenIn(BaseModel):
     pattern: str = "face_split"
     n_circuit: int = 4
     inlet_end: str = "z0"
+    reverse: bool = False          # 생성 후 유동 방향 반전
 
 
 class DistIn(BaseModel):
@@ -221,7 +222,25 @@ def gen_circuits(req: GenIn):
     cs = (g(p, req.n_circuit, req.inlet_end)
           if req.pattern in ("face_split", "interlaced")
           else g(p, req.inlet_end))
+    if req.reverse:
+        cs = CQC.reverse_all(cs)
     return {"circuits": cs.model_dump(), **CQC.build(p, cs)}
+
+
+class RevIn(BaseModel):
+    case: CaseIn
+    circuits: Optional[List[str]] = None   # None → 전체 반전
+
+
+@app.post("/api/circuits/reverse")
+def reverse_circuits(req: RevIn):
+    """유동 방향 반전. 벤드 형상은 그대로고 입출구만 맞바뀜."""
+    p = req.case.to_params()
+    cs = req.case.to_circuits()
+    if cs is None:
+        raise HTTPException(400, "circuits 가 비어 있음")
+    rv = CQC.apply_reverse(cs, req.circuits)
+    return {"circuits": rv.model_dump(), **CQC.build(p, rv)}
 
 
 @app.post("/api/circuits/validate")

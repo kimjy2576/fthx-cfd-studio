@@ -233,6 +233,7 @@ canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%}
 .cerow button{border:1px solid var(--line);background:#fff;border-radius:6px;padding:1px 5px;
   font-family:var(--mono);font-size:9.5px;color:var(--dim);cursor:pointer}
 .cerow button:hover{border-color:var(--blue);color:var(--blue-d)}
+.cerow .cerev{font-size:11px;line-height:1}
 .cewarn{padding:9px 11px;border-radius:9px;font-family:var(--mono);font-size:10.5px;line-height:1.65}
 .cewarn.ok{background:var(--sky-l);color:#2E5A85}
 .cewarn.bad{background:#FDECEA;color:#9E2B1E}
@@ -323,7 +324,10 @@ canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%}
     <div class="lbl2">회로 <span style="float:right;text-transform:none;letter-spacing:0;
       color:var(--dimmer)">관 클릭·드래그로 경로 지정</span></div>
     <div id="ceList" style="display:flex;flex-direction:column;gap:5px"></div>
-    <button class="act" id="ceAdd">+ 회로 추가</button>
+    <div class="cegen">
+      <button class="act" id="ceAdd">+ 회로 추가</button>
+      <button class="act" id="ceRevAll">⇄ 전체 방향 반전</button>
+    </div>
     <div class="lbl2">검증</div>
     <div class="cewarn ok" id="ceWarn"></div>
    </div>
@@ -631,12 +635,22 @@ function validateCircuits(bends){
   return {msgs, miss};
 }
 
+/* 관 하나를 지날 때마다 끝단이 뒤집힘 → n 개면 n 번.
+   벤드 수(n-1) 로 판정하면 단일 관에서 입·출구가 같은 면이 되어 모순 */
+const outletEnd=(ie,n)=> (n%2===0) ? ie : (ie==="z0"?"z1":"z0");
+
+/* 유동 방향 반전 — 관 순서를 역으로 하고 입구 끝단을 기존 출구 끝단으로.
+   벤드 형상은 완전히 동일하고 입출구만 맞바뀜 */
+function reverseCircuit(ck){
+  return {id:ck.id, tubes:ck.tubes.slice().reverse(),
+          inlet_end:outletEnd(ck.inlet_end, ck.tubes.length), m_frac:ck.m_frac};
+}
+
 /* ---------- 입출구 포트 ---------- */
 function ioPorts(){
   const xy=XY(), B0=bbox(), out=[];
   CIRC.list.forEach(ck=>{
-    const n=ck.tubes.length, ie=ck.inlet_end;
-    const oe = ((n-1)%2===0) ? ie : (ie==="z0"?"z1":"z0");
+    const n=ck.tubes.length, ie=ck.inlet_end, oe=outletEnd(ie,n);
     [["inlet",ck.tubes[0],ie],["outlet",ck.tubes[n-1],oe]].forEach(([kind,t,e])=>{
       const TZ=tubeZ(), ps=P.port_stub||0;
       if(xy[t]) out.push({name:`ref_${kind}_${ck.id}`, circuit:ck.id, kind, tube:t,
@@ -755,6 +769,7 @@ function ceSide(){
       <b>${c.id}</b>
       <span>관 ${c.n_tube} · 벤드 ${c.n_bend}</span>
       <span class="num">${fmt(c.path_mm,0)}mm</span>
+      <button class="cerev" data-ix="${ix}" title="유동 방향 반전">⇄</button>
       <button class="cein" data-ix="${ix}" title="입구 끝단">${CIRC.list[ix].inlet_end}</button>
       <button class="cedel" data-ix="${ix}" title="삭제">×</button>
     </div>`).join("");
@@ -762,6 +777,9 @@ function ceSide(){
     if(e.target.closest("button"))return; CIRC.active=+n.dataset.ix; ceRender();});
   document.querySelectorAll(".cein").forEach(n=>n.onclick=()=>{
     const c=CIRC.list[+n.dataset.ix]; c.inlet_end=c.inlet_end==="z0"?"z1":"z0";
+    CIRC.pattern="custom"; analyzeCircuits(); ceRender(); refresh(true);});
+  document.querySelectorAll(".cerev").forEach(n=>n.onclick=()=>{
+    const i=+n.dataset.ix; CIRC.list[i]=reverseCircuit(CIRC.list[i]);
     CIRC.pattern="custom"; analyzeCircuits(); ceRender(); refresh(true);});
   document.querySelectorAll(".cedel").forEach(n=>n.onclick=()=>{
     CIRC.list.splice(+n.dataset.ix,1); CIRC.active=0; CIRC.pattern="custom";
@@ -1413,6 +1431,9 @@ document.getElementById("ceN").onchange=e=>{
   CIRC.nc=Math.max(1,parseInt(e.target.value)||4);
   if(CIRC.pattern==="face_split"||CIRC.pattern==="interlaced"){
     regenCircuits(); ceRender(); refresh(true);}};
+document.getElementById("ceRevAll").onclick=()=>{
+  CIRC.list=CIRC.list.map(reverseCircuit);
+  CIRC.pattern="custom"; analyzeCircuits(); ceRender(); refresh(true);};
 document.getElementById("ceAdd").onclick=()=>{
   const n=CIRC.list.length+1;
   CIRC.list.push({id:"c"+String(n).padStart(2,"0"),tubes:[],inlet_end:"z0",m_frac:null});
