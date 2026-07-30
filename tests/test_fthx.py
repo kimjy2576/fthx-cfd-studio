@@ -642,18 +642,25 @@ def test_tutorial_has_five_bodies_and_opposite_ports():
                      "fluid_ref_r01t01", "solid_tube_r01t01"]
     ends = {q["kind"]: q["end"] for q in m["circuits"]["ports"]}
     assert ends["inlet"] != ends["outlet"]        # 관 1개 → 반대편
-    # 포러스 코어와 관벽이 원통면을 정확히 공유해야 함 (Share Topology 조건)
+    # 튜토리얼은 L_fin=L 이라 관 외벽면과 코어 구멍면이 정확히 일치해야 함
+    # (imprint 없이 Share Topology 로 바로 붙는 가장 쉬운 조건)
+    assert p.fin_pack["z0"] == 0 and p.fin_pack["z1"] == p.tube.L
     B = {c.name: c.obj for c in assy.children}
-    shared = [f1.Area() for f1 in B["solid_tube_r01t01"].Faces()
-              for f2 in B["fluid_air_core_r01"].Faces()
-              if abs(f1.Area() - f2.Area()) < 1e-6
-              and (f1.Center() - f2.Center()).Length < 1e-6]
-    assert shared, "포러스↔관벽 공유면 없음"
+
+    def exact(n1, n2):
+        return [f1.Area() for f1 in B[n1].Faces() for f2 in B[n2].Faces()
+                if abs(f1.Area() - f2.Area()) < 1e-6
+                and (f1.Center() - f2.Center()).Length < 1e-6]
+
+    assert exact("solid_tube_r01t01", "fluid_air_core_r01"), "포러스↔관벽 공유면 없음"
+    assert exact("solid_tube_r01t01", "fluid_ref_r01t01"), "관벽↔냉매 공유면 없음"
 
 
 @needs_cad
-def test_probe_has_thirteen_bodies():
+def test_probe_is_harder_than_tutorial():
+    """probe 는 일부러 어려운 조건 — 핀팩이 관보다 짧아 imprint 가 필요함"""
     from fthx import presets
     p = presets.probe()
     assy, _ = CAD.build(p, CQC.gen_single(p))
     assert len(assy.children) == 13
+    assert p.fin_pack["z0"] > 0 and p.fin_pack["z1"] < p.tube.L

@@ -14,15 +14,21 @@ def tutorial() -> FTHXParams:
     구조적으로 확인해야 할 것은 다 들어 있음:
       · fluid_air_core_r01 (포러스) ↔ solid_tube_r01t01 원통면 공유
       · solid_tube (두께 0.65mm) 얇은 솔리드 메싱
-      · fluid_ref (관내) 
+      · fluid_ref (관내)
       · 상·하류 연장 박스
-    벤드가 없어 비정형 메싱은 빠짐 → probe() 에서 확인.
+
+    의도적으로 **가장 쉬운 조건**으로 둠 — 핀팩이 관 전장을 채우므로(L_fin=L)
+    관 외벽 원통면과 코어 구멍면이 **정확히 일치**함. 즉 Share Topology 가
+    imprint 없이 바로 붙어야 함. 여기서 안 붙으면 설정 문제임.
+
+    핀팩이 관보다 짧은 실제 조건(면 길이가 달라 imprint 필요)과 벤드
+    비정형 메싱은 probe() 에서 확인.
     """
     return FTHXParams(
         name="tutorial_1tube",
         tube=TubeSpec(Do=9.52, Di=8.22, L=100, Nr=1, Nt=1,
                       Pt=25.4, Pl=22.0, layout="inline"),
-        fin=FinSpec(FPI=14, t_f=0.115, L_fin=80),
+        fin=FinSpec(FPI=14, t_f=0.115),        # L_fin=None → 관 전장 = 100
         domain=DomainSpec(L_up=40, L_down=80,
                           include_bends=False, include_tube_fluid=True),
         export={"write_pcurves": False},
@@ -30,7 +36,12 @@ def tutorial() -> FTHXParams:
 
 
 def probe() -> FTHXParams:
-    """관 3개 · 단일 회로(벤드 2개) — 13 바디."""
+    """관 3개 · 단일 회로(벤드 2개) — 13 바디.
+
+    튜토리얼보다 어려운 조건을 일부러 넣음:
+      · L_fin(80) < L(100) → 관 외벽 면이 코어 구멍면보다 길어 imprint 필요
+      · 벤드 2개 → 비정형(poly/tet) 메싱
+    """
     return FTHXParams(
         name="probe_small",
         tube=TubeSpec(Do=9.52, Di=8.22, L=100, Nr=1, Nt=3,
