@@ -10,7 +10,30 @@ STEP 이 Fluent Meshing 에 깨끗히 들어오는지 확인하는 단계임.
 
 ---
 
-## 0) 확인용 STEP 만들기
+## 0) 시험용 STEP 만들기
+
+### 작은 케이스 먼저 (권장)
+
+전체 케이스(190 바디)로 첫 메시를 돌리면 오래 걸리고 실패 시 원인 분리가
+어려움. 구조적으로 확인할 것은 전부 들어 있으면서 1~2분에 끝나는 크기:
+
+```bash
+python scripts/gen_probe.py
+# → out/probe_small.step   (13 바디, 85 KB)
+#    1열 x 3단, 관 100mm, 핀팩 80mm, 단일 회로(벤드 2개)
+```
+
+바디 13개:
+
+```
+fluid_air_up  fluid_air_core_r01  fluid_air_down
+solid_tube_r01t01..03   fluid_ref_r01t01..03
+solid_bend_c01_k01..02  fluid_bend_c01_k01..02
+```
+
+### 전체 케이스
+
+
 
 ```bash
 python scripts/gen_case.py --pattern face_split -n 4
