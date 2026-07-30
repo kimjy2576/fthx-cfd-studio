@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from scipy.optimize import brentq
 
@@ -66,6 +66,14 @@ class PlenumSpec:
     split_frac: float = 0.5       # 피더를 둘로 쪼개는 위치 (porous jump 면)
     jump_thick: float = 1.0       # mm, porous jump 매질 두께
     auto_offset: bool = False     # 벤드와 안 겹치도록 offset 자동 확대
+    # ── 입구 발달 스터브 (플레넘 축 방향 연장관) ──────────────
+    stub_len: float = 0.0         # mm, 0 이면 스터브 없음(기존 동작)
+    D_stub: Optional[float] = None  # mm, None → 플레넘 내경과 동일(단차 없음)
+    stub_auto: bool = False       # 발달 길이만큼 자동 확보
+    stub_criterion: Literal["full", "practical"] = "practical"
+
+    def stub_dia(self) -> float:
+        return self.D_stub if self.D_stub is not None else self.D_plenum
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -204,6 +212,35 @@ def legs_from_circuits(p: FTHXParams, cs: CQC.CircuitSet,
         legs.append(Leg(cid=c["id"], L_path=c["path_mm"],
                         n_bend=c["n_bend"], L_feed=L_feed))
     return legs
+
+
+def entry_length(D_mm: float, m_kgs: float, rho: float, mu: float) -> dict:
+    """수력학적 발달 길이.
+       난류는 Bhatti&Shah  L_e/D = 4.4·Re^(1/6),  층류는 L_e/D = 0.05·Re."""
+    D = D_mm / 1000.0
+    A = math.pi * D * D / 4.0
+    v = m_kgs / (rho * A)
+    Re = rho * v * D / mu
+    ratio = 4.4 * Re ** (1.0 / 6.0) if Re > 2300 else 0.05 * Re
+    return {"D_mm": D_mm, "v_ms": v, "Re": Re,
+            "Le_over_D": ratio, "Le_mm": ratio * D_mm,
+            "regime": "turbulent" if Re > 2300 else "laminar"}
+
+
+def stub_development(p: FTHXParams, pl: PlenumSpec, fl: Fluid,
+                     m_total: float) -> dict:
+    """입구 스터브가 발달 길이를 확보했는지. 스터브에는 총유량이 흐름."""
+    rho, mu = fl.props()
+    e = entry_length(pl.stub_dia(), m_total, rho, mu)
+    need = e["Le_mm"]
+    prac = 10.0 * pl.stub_dia()          # 실무 기준: 프로파일 95% 발달 ≈ 10D
+    return {**e, "stub_len_mm": pl.stub_len,
+            "Le_full_mm": round(need, 1), "Le_practical_mm": round(prac, 1),
+            "developed_full": pl.stub_len >= need - 1e-9,
+            "developed_practical": pl.stub_len >= prac - 1e-9,
+            "fraction_full": (pl.stub_len / need) if need > 0 else 1.0,
+            "criterion_note": "full = 4.4·Re^(1/6)·D (Bhatti&Shah), "
+                              "practical = 10D (프로파일 95%)"}
 
 
 # ══════════════════════════════════════════════════════════════════

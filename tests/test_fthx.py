@@ -485,3 +485,57 @@ def test_step_export_options(ex, tmp_path):
     m = CAD.export(q, outdir=str(tmp_path), cs=CQC.gen_face_split(q, 4))
     txt = open(m["_files"]["step"], errors="ignore").read()
     assert len(re.findall(r"PRODUCT\('([^']+)'", txt)) == 191
+
+
+# ─────────────────── 입구 발달 스터브 (v0.6.0) ───────────────────
+@needs_cp
+def test_entry_length_regimes():
+    lam = DST.entry_length(8.22, 1e-5, 38.18, 12.46e-6)
+    tur = DST.entry_length(8.22, 7.5e-3, 38.18, 12.46e-6)
+    assert lam["regime"] == "laminar" and tur["regime"] == "turbulent"
+    assert tur["Le_over_D"] == pytest.approx(4.4 * tur["Re"] ** (1 / 6), rel=1e-12)
+
+
+@needs_cp
+def test_stub_development_criteria(p):
+    pl = DST.PlenumSpec(stub_len=0)
+    d = DST.stub_development(p, pl, DST.Fluid(), 0.030)
+    assert d["Le_practical_mm"] == pytest.approx(10 * pl.stub_dia())
+    assert d["Le_full_mm"] > d["Le_practical_mm"]          # Re 가 크면 full > 10D
+    assert not d["developed_practical"] and not d["developed_full"]
+    ok = DST.stub_development(p, DST.PlenumSpec(stub_len=d["Le_full_mm"] + 1),
+                              DST.Fluid(), 0.030)
+    assert ok["developed_full"] and ok["developed_practical"]
+
+
+@needs_cad
+@needs_cp
+def test_stub_geometry_and_port_moves(p):
+    cs = CQC.gen_face_split(p, 4)
+    _, m0 = CAD.build(p, cs, DST.PlenumSpec())
+    _, m1 = CAD.build(p, cs, DST.PlenumSpec(stub_len=160))
+    y0 = [q for q in m0["plenum"]["plenums"] if q["kind"] == "inlet"][0]["main_port_seed"][1]
+    y1 = [q for q in m1["plenum"]["plenums"] if q["kind"] == "inlet"][0]["main_port_seed"][1]
+    assert y1 == pytest.approx(y0 - 160)                   # 입구면이 스터브 끝으로 이동
+    assy, _ = CAD.build(p, cs, DST.PlenumSpec(stub_len=160))
+    B = {c.name: c.obj for c in assy.children}
+    assert "fluid_stub_in_z0" in B and "fluid_stub_out_z1" in B
+    # 스터브 ↔ 플레넘 conformal
+    hits = []
+    for f1 in B["fluid_stub_in_z0"].Faces():
+        for f2 in B["fluid_plenum_in_z0"].Faces():
+            c1, c2 = f1.Center(), f2.Center()
+            if abs(f1.Area() - f2.Area()) < 1e-6 and max(
+                    abs(c1.x - c2.x), abs(c1.y - c2.y), abs(c1.z - c2.z)) < 1e-6:
+                hits.append(f1.Area())
+    assert hits, "스터브와 플레넘이 면을 공유하지 않음"
+
+
+@needs_cad
+@needs_cp
+@pytest.mark.parametrize("crit,flag", [("practical", "developed_practical"),
+                                       ("full", "developed_full")])
+def test_stub_auto_satisfies_criterion(p, crit, flag):
+    _, m = CAD.build(p, CQC.gen_face_split(p, 4),
+                     DST.PlenumSpec(stub_auto=True, stub_criterion=crit))
+    assert m["plenum"]["stub_development"][flag] is True

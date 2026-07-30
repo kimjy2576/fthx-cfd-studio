@@ -180,12 +180,23 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
             f"피더 {2*n_tube}개가 생성됨. 회로(CircuitSet)를 지정하거나 "
             f"include_bends=True 로 둘 것")
     if plenum is not None:
+        if plenum.stub_auto:
+            _dv = DST.stub_development(p, plenum, DST.Fluid(),
+                                       p.operating.ref.m_total)
+            _need = (_dv["Le_full_mm"] if plenum.stub_criterion == "full"
+                     else _dv["Le_practical_mm"])
+            if plenum.stub_len < _need:
+                plenum = dataclasses.replace(plenum, stub_len=math.ceil(_need))
         clr = DST.check_clearances(p, cs, plenum)
         if plenum.auto_offset and not clr["offset_ok"]:
             plenum = dataclasses.replace(plenum, offset=clr["min_offset_mm"] + 2.0)
             clr = DST.check_clearances(p, cs, plenum)
         plen_meta = {"D_plenum_mm": plenum.D_plenum, "offset_mm": plenum.offset,
                      "D_feed_mm": plenum.D_feed, "clearance": clr,
+                     "stub_development": DST.stub_development(
+                         p, plenum, DST.Fluid(p.operating.ref.fluid,
+                                              p.operating.ref.T_sat_in, 1.0),
+                         p.operating.ref.m_total),
                      "jumps": [], "plenums": []}
         by = {}
         for prt in rep["ports"]:
@@ -201,12 +212,29 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
             ya, yb = min(ys) - Dp * 0.6, max(ys) + Dp * 0.6
             pl_solid = cq.Solid.makeCylinder(Dp / 2, yb - ya,
                           cq.Vector(xp, ya, zp), cq.Vector(0, 1, 0))
-            pname = f"fluid_plenum_{'in' if kind=='inlet' else 'out'}_{end}"
+            kk0 = "in" if kind == "inlet" else "out"
+            pname = f"fluid_plenum_{kk0}_{end}"
             assy.add(pl_solid, name=pname, color=cq.Color(0.2, 0.4, 0.9))
+
+            # 입구 발달 스터브: 플레넘 축(-y)으로 연장. 별도 바디로 두어
+            # 매니폴드 진입 프로파일을 따로 확인할 수 있게 함.
+            port_y = ya
+            if plenum.stub_len > 0:
+                Ds = plenum.stub_dia()
+                stub = cq.Solid.makeCylinder(
+                    Ds / 2, plenum.stub_len,
+                    cq.Vector(xp, ya - plenum.stub_len, zp), cq.Vector(0, 1, 0))
+                if Ds > Dp:                     # 스터브가 더 굵으면 플레넘을 파냄
+                    stub = stub.cut(pl_solid)
+                assy.add(stub, name=f"fluid_stub_{kk0}_{end}",
+                         color=cq.Color(0.35, 0.55, 0.95))
+                port_y = ya - plenum.stub_len
             plen_meta["plenums"].append({
                 "name": pname, "kind": kind, "end": end, "D_mm": Dp,
                 "axis_x": xp, "z": zp, "y_range": [ya, yb],
-                "main_port_seed": [xp, ya, zp],
+                "stub_len_mm": plenum.stub_len,
+                "stub_D_mm": plenum.stub_dia() if plenum.stub_len > 0 else None,
+                "main_port_seed": [xp, port_y, zp],
                 "main_port_name": f"ref_{'inlet' if kind=='inlet' else 'outlet'}_main_{end}"})
 
             clear = plenum.offset - Dp / 2                    # 플레넘 표면까지 여유
