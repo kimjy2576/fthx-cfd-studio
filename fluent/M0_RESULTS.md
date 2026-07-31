@@ -82,3 +82,65 @@ probe 최저 품질이 벤드가 아니라 관벽임 (`solid_tube_r01t02` 0.225)
 
 상·하류 연장이 1/4 을 차지함 — 유동 발달 외에는 정보가 없는 영역이므로
 Max size 를 더 키우거나 하류 길이를 줄일 여지가 있음 (C 단계 항목).
+
+
+---
+
+# M1 결과 — 저널 자동 실행 (LSF 배치)
+
+`fluent 3d -meshing -g -t32 -i mesh.py` 로 **GUI 조작 없이 완주**함.
+
+| 단계 | 결과 |
+|---|---|
+| InitializeWorkflow ~ 7. Volume Mesh | 전부 OK |
+| 8. check-mesh / 9. boundary list | OK |
+| 10. write mesh | **OK** → `mesh.msh.h5` 생성 |
+
+| | 값 |
+|---|---|
+| 셀 존 | **13** (STEP 바디 수와 일치) |
+| 셀 | **229,026** |
+| 최소 직교품질 | **0.26** |
+| 소요 | 0.18 분 (32 core) |
+
+## 확정된 것
+
+**워크플로우 인자 이름이 전부 맞았음** — 녹화 없이 문서 기준으로 작성한 값이
+2025 R1 에서 그대로 통했음:
+
+```python
+{"CFDSurfaceMeshControls": {"MinSize", "MaxSize", "GrowthRate",
+                            "CellsPerGap", "SizeFunctions", "ScopeProximityTo"}}
+{"SetupType": "The geometry consists of both fluid and solid regions and/or voids",
+ "InvokeShareTopology": "Yes", ...}
+{"VolumeFill": "polyhedra"}
+```
+
+## 발견
+
+### `tui` 는 전역이 아님
+
+Fluent 내장 파이썬에서 `tui.mesh.check_mesh()` 가 `NameError`.
+1차 실행에서 8~10 단계가 실패했고, **10 단계가 메시 저장이라 파일이 안 만들어졌음.**
+→ `TUI()` 헬퍼로 여러 후보를 탐색하도록 수정해 해결.
+
+### 코어 수가 셀 수를 바꿈
+
+| | 셀 |
+|---|---|
+| GUI, 4 core | 164,461 |
+| 배치, 32 core | **229,026** (+39%) |
+
+병렬 분할 경계에서 메시가 달라지기 때문임.
+**케이스 간 비교 시 `-t` 를 고정해야 함.** 같은 코어 수에서는 재현됨
+(32 core 두 번 실행 모두 229,026).
+
+## 환경
+
+| | |
+|---|---|
+| 스케줄러 | LSF (`fluent` 은 bsub Perl 래퍼) |
+| 큐 | `fluent` |
+| 허용 코어 | 1 / 2 / 4 / 8 / 32 / 128 / 256 / 512 |
+| Fluent | 2025 R1 (Rev 25.1.0) |
+| 서버 파이썬 | pip 없음 → **Fluent 내장 파이썬 저널로 해결** |
