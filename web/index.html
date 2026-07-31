@@ -1453,10 +1453,16 @@ document.querySelectorAll("#tutSeg button").forEach(b=>b.onclick=async()=>{
         +` Max <code>${sz.workflow_max_mm}</code> mm</li>`
         +`<li>Describe Geometry → Share Topology <code>Yes</code></li>`
         +`<li>Add Boundary Layers → 이번엔 <code>건너뜀</code></li></ul>`
-        +`<b>Add Local Sizing</b> (필수)<ul>`
+        +`<b>Add Local Sizing</b><ul>`
         +(sz.local_sizing||[]).map(l=>`<li><code>${l.scope}</code> → `
            +`<code>${l.size_mm}</code> mm<br><span style="color:var(--dim)">${l.why}</span></li>`).join("")
         +`</ul>`
+        +(sz.wall ? `<b>관벽</b> ${sz.wall.t_wall_mm.toFixed(2)}mm ·`
+            +` Bi=${sz.wall.Biot.toExponential(1)}`
+            +` → <code>${sz.wall.strategy}</code><br>`
+            +`<span style="color:var(--dim)">두께 방향 등온이라 표면을 조밀하게`
+            +` 만들 필요 없음. 관 표면은 코어·냉매와 공유되므로 얇게 잡으면`
+            +` 이웃 존까지 폭증함</span>` : "")
         +`<span style="color:var(--dim)">관벽 ${sz.h_wall_mm.toFixed(3)}mm 기준.`
         +` 이보다 굵게 잡으면 관벽에 셀이 안 들어감</span>` : "";
     toast("튜토리얼 STEP 내려받음", head+mesh);

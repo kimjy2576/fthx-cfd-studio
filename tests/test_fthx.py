@@ -671,11 +671,14 @@ def test_sizing_is_derived_from_geometry(p):
     from fthx import meshing
     s = meshing.sizing(p)
     assert s["h_air_mm"] == pytest.approx((p.tube.Pt - p.tube.Do) / 10)
-    assert s["h_wall_mm"] == pytest.approx((p.tube.Do - p.tube.Di) / 2 / 3)
+    assert s["h_wall_mm"] == pytest.approx((p.tube.Do - p.tube.Di) / 2 / 1)
     assert s["h_ref_mm"] == pytest.approx(p.tube.Di / 12)
-    # 관벽이 가장 얇은 피처이므로 최소 크기를 지배해야 함
-    assert s["workflow_min_mm"] == pytest.approx(round(s["h_wall_mm"], 3))
+    # 관 표면은 코어·냉매와 공유되므로 관벽 두께가 표면 크기를 지배하면 안 됨
+    assert s["workflow_min_mm"] == pytest.approx(round(s["h_ref_mm"], 3))
     assert s["workflow_min_mm"] < s["workflow_max_mm"]
+    # 고전도 박벽은 두께 방향 등온 → thin volume 전략
+    assert s["wall"]["Biot"] < 0.01
+    assert s["wall"]["strategy"] == "thin_volume"
 
 
 def test_sizing_scales_with_geometry():
