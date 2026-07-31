@@ -848,6 +848,7 @@ def test_journal_m2_labeling_section():
     assert 'MU.get_face_zones(filter="*")' in j
     assert "get_average_bounding_box_center(face_zone_id_list=[zid])" in j
     assert "get_face_zone_area(face_zone_id_list=[zid])" in j
-    assert "sep_face_zone_by_angle" in j          # 바디 단위 존을 면 단위로
+    assert "sep_face_zone_by_angle" in j
+    assert "13a. TUI 트리에서 분리 명령 찾기" in j          # 바디 단위 존을 면 단위로
     assert "14. face_seeds 좌표 매칭" in j
     assert "_labeled.msh" in j                     # 라벨된 메시 별도 저장

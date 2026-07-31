@@ -144,3 +144,52 @@ Fluent 내장 파이썬에서 `tui.mesh.check_mesh()` 가 `NameError`.
 | 허용 코어 | 1 / 2 / 4 / 8 / 32 / 128 / 256 / 512 |
 | Fluent | 2025 R1 (Rev 25.1.0) |
 | 서버 파이썬 | pip 없음 → **Fluent 내장 파이썬 저널로 해결** |
+
+
+---
+
+# M2 진행 — 좌표 기반 경계 라벨링
+
+## 확정된 API (2025 R1)
+
+```python
+mu.get_face_zones(filter="*")                              # -> [id, ...]  41개
+mu.get_cell_zones(filter="*")                              # -> [id, ...]  13개
+mu.convert_zone_ids_to_name_strings(zone_id_list=ids)      # -> [name, ...]
+mu.get_average_bounding_box_center(face_zone_id_list=[id]) # -> [x, y, z]
+mu.get_face_zone_area(face_zone_id_list=[id])              # -> float
+mu.rename_face_zone(zone_name=old, new_name=new)           # -> True
+```
+
+**키워드 인자만 허용.** 위치 인자는 `TypeError: Only keyword arguments should be provided`.
+
+## 성공한 부분
+
+```
+ref_inlet_c01   -> fluid_ref_r01t01-solid:1   거리 0.009 mm   rename OK
+ref_outlet_c01  -> fluid_ref_r01t03-solid:1   거리 0.010 mm   rename OK
+```
+
+**좌표 매칭 방식이 검증됨.** 계면 이름을 신뢰할 수 없다는 M0 결론에 대한 해답이 맞음.
+
+## 존 그룹핑 규칙 (핵심 발견)
+
+Fluent 은 **인접 관계가 같은 면을 한 존으로 묶음.** 면적 검산으로 확인:
+
+`fluid_air_up-solid:1` = 18,592 mm²
+= 입구면(76.2×80=6,096) + 상하벽(2×40×80=6,400) + 측벽(2×40×76.2=6,096)
+
+| | 결과 |
+|---|---|
+| 관 끝면 (52.1 mm²) | 이웃 없음 → **단독 존** → 매칭 성공 |
+| 박스 외벽 5면 | 전부 이웃 없음 → **한 덩어리** → 입구면 특정 불가 |
+
+→ 박스 외벽은 **기하학적 분리(각도)** 가 필요함.
+
+## 미해결
+
+`boundary.manage.separate` 는 존재하지 않음 (`AttributeError`).
+분리 명령의 정확한 TUI 경로를 탐색 중 (13a 단계).
+
+대안: 솔버의 `/mesh/modify-zones/separate-face-zone-by-angle` 는 오래된 안정
+명령이고, M3(SETUP)가 어차피 솔버에서 도므로 거기서 라벨링해도 됨.

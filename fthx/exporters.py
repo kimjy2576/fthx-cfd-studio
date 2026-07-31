@@ -287,53 +287,72 @@ def _dump_zones():
                ("%.1f" % r["area"]) if r["area"] else "?"))
 step("12. 면 존 표 (id/이름/좌표/면적)", _dump_zones)
 
+def _tui_tree():
+    """분리 명령 경로 탐색. boundary.manage.separate 는 없음(실측).
+       TUI 트리를 직접 훑어 sep/separate 계열을 찾음."""
+    tui = TUI()
+    for path in ("boundary", "boundary.manage", "boundary.improve",
+                 "boundary.modify", "mesh", "mesh.modify_zones"):
+        o = tui
+        ok = True
+        for part in path.split("."):
+            o = getattr(o, part, None)
+            if o is None:
+                ok = False
+                break
+        if not ok:
+            print("    [--] %s 없음" % path)
+            continue
+        ns = [n for n in dir(o) if not n.startswith("_")]
+        hit = [n for n in ns if "sep" in n.lower() or "angle" in n.lower()]
+        print("    [OK] %-22s 항목 %d개   분리계열: %s" %
+              (path, len(ns), hit if hit else "없음"))
+        if path == "boundary":
+            for i in range(0, len(ns), 6):
+                print("         " + ", ".join(ns[i:i + 6]))
+step("13a. TUI 트리에서 분리 명령 찾기", _tui_tree)
+
 def _separate():
-    """박스형 존은 면끼리 90도이므로 40도 기준으로 쪼개면 면 단위가 됨."""
+    """박스형 존은 면끼리 90도이므로 40도 기준으로 쪼개면 면 단위가 됨.
+       경로 후보를 순서대로 시도하고 각각의 오류를 남김."""
     tui = TUI()
     rows = globals().get("_ROWS") or []
-    targets = [r for r in rows
-               if r["name"] and "interior" not in str(r["name"])
-               and "-solid" in str(r["name"])]
-    print("    분리 대상 %d개" % len(targets))
+    # 박스 외벽만 대상 — 관 끝면은 이미 단독 존이라 손댈 필요 없음
+    targets = [r for r in rows if r["name"] and "interior" not in str(r["name"])
+               and str(r["name"]).startswith("fluid_air_")
+               and "-solid-" not in str(r["name"])]
+    print("    분리 대상 %d개: %s" % (len(targets), [r["name"] for r in targets]))
+    paths = ("boundary.separate.sep_face_zone_by_angle",
+             "boundary.separate.separate_face_zone_by_angle",
+             "boundary.sep_face_zone_by_angle",
+             "mesh.modify_zones.separate_face_zone_by_angle")
     done = 0
-    for r in targets[:40]:
-        for path in ("boundary.separate.sep_face_zone_by_angle",
-                     "boundary.manage.separate.sep_face_zone_by_angle"):
-            try:
-                o = tui
-                for part in path.split("."):
-                    o = getattr(o, part)
-                o(r["name"], 40)
-                done += 1
-                break
-            except Exception as e:
-                last = type(e).__name__ + ": " + str(e)[:80]
-        else:
-            print("    [--] %s : %s" % (r["name"], last))
+    for r in targets:
+        for path in paths:
+            o, ok = tui, True
+            for part in path.split("."):
+                o = getattr(o, part, None)
+                if o is None:
+                    ok = False
+                    break
+            if not ok:
+                print("    [--] %s : 경로 없음 (%s)" % (path, r["name"]))
+                continue
+            for args in ((r["name"], 40), (r["name"], 40, "yes")):
+                try:
+                    o(*args)
+                    print("    [OK] %s %s" % (path, str(args)[:60]))
+                    done += 1
+                    break
+                except Exception as e:
+                    print("    [--] %s%s : %s: %s" %
+                          (path, str(args)[:40], type(e).__name__, str(e)[:80]))
+            else:
+                continue
+            break
     print("    분리 성공 %d개" % done)
-step("13. 존 각도 분리 (40도)", _separate)
+step("13b. 존 각도 분리 (40도)", _separate)
 
-def _match():
-    """분리 후 존 좌표를 face_seeds 와 최근접 매칭."""
-    rows = zone_table()
-    globals()["_ROWS2"] = rows
-    print("    분리 후 면 존 %d개" % len(rows))
-    cand = [r for r in rows if r["c"]]
-    hits = {{}}
-    for key, seed in FACE_SEEDS.items():
-        best, bd = None, 1e18
-        for r in cand:
-            c = r["c"]
-            d = ((c[0]-seed[0])**2 + (c[1]-seed[1])**2 + (c[2]-seed[2])**2) ** 0.5
-            if d < bd:
-                best, bd = r, d
-        hits[key] = (best, bd)
-        print("    %-16s -> id %-8s %-40s  거리 %.3f mm" %
-              (key, best["id"] if best else "?",
-               str(best["name"])[:40] if best else "?", bd))
-    bad = [k for k, (r, d) in hits.items() if d > 1.0]
-    print("    임계값 1mm 초과: %s" % (bad if bad else "없음"))
-    globals()["_HITS"] = hits
 step("14. face_seeds 좌표 매칭", _match)
 
 def _rename():
