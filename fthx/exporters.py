@@ -290,66 +290,9 @@ def _dump_zones():
                ("%.1f" % r["area"]) if r["area"] else "?"))
 step("12. 면 존 표 (id/이름/좌표/면적)", _dump_zones)
 
-def _tui_exec():
-    """TUI 명령을 문자열로 실행하는 진입점 탐색.
-
-    dir() 로 TUI 트리를 훑는 방식은 신뢰할 수 없음 — getattr 이 존재하지 않는
-    이름에도 빈 메뉴를 돌려줌(boundary.improve 가 0개, sep_face_zone_by_angle
-    이 호출 불가 메뉴로 나온 이유). 문자열 실행이 되면 문서화된 TUI 명령을
-    그대로 쓸 수 있어 탐색이 끝남.
-    """
-    g = globals()
-    for nm in ("run_menu", "cx", "flapi", "PyTUI", "flglobals"):
-        o = g.get(nm)
-        print("    %-12s %s" % (nm, type(o)))
-        if o is None:
-            continue
-        ns = [n for n in dir(o) if not n.startswith("_")]
-        hit = [n for n in ns
-               if any(k in n.lower() for k in ("exec", "eval", "menu", "tui",
-                                               "scheme", "command", "string"))]
-        print("                 관련: %s" % (hit[:14] if hit else "없음"))
-    LIST = "/boundary/manage/list"
-    SCM = "(ti-menu-load-string " + '"' + LIST + '"' + ")"
-    _try_all("TUI 문자열 실행", [
-        ("run_menu(LIST)", lambda: g["run_menu"](LIST)),
-        ("run_menu(LIST[1:])", lambda: g["run_menu"](LIST[1:])),
-        ("cx.eval(SCM)", lambda: g["cx"].eval(SCM)),
-        ("flapi.eval(SCM)", lambda: g["flapi"].eval(SCM)),
-        ("cx.scheme_eval(SCM)", lambda: g["cx"].scheme_eval(SCM)),
-    ])
-step("13a. TUI 문자열 실행 진입점", _tui_exec)
-
-def _separate():
-    """박스 외벽을 각도로 분리. 문자열 실행이 되면 문서화된 경로를 그대로 씀."""
-    g = globals()
-    rows = g.get("_ROWS") or []
-    targets = [r for r in rows if r["name"] and "interior" not in str(r["name"])
-               and str(r["name"]).startswith("fluid_air_")
-               and "-solid-" not in str(r["name"])]
-    print("    분리 대상 %d개: %s" % (len(targets), [r["name"] for r in targets]))
-    rm = g.get("run_menu")
-    done = 0
-    for r in targets:
-        nm = r["name"]
-        cands = []
-        if rm:
-            cands += [
-                ("run_menu sep-face-zone-by-angle",
-                 lambda nm=nm: rm("/boundary/separate/sep-face-zone-by-angle %s 40 ()"
-                                  % nm)),
-                ("run_menu separate-face-zone-by-angle",
-                 lambda nm=nm: rm("/mesh/modify-zones/separate-face-zone-by-angle "
-                                  "%s 40" % nm)),
-            ]
-        cands.append(("mu.separate_face_zones_by_cell_neighbor",
-                      lambda nm=nm: MU.separate_face_zones_by_cell_neighbor(
-                          face_zone_name_list=[nm])))
-        got, _ = _try_all("분리 %s" % nm, cands)
-        if got:
-            done += 1
-    print("    분리 성공 %d개" % done)
-step("13b. 존 각도 분리 (40도)", _separate)
+# 각도 분리 단계는 제거함.
+# 케이싱 솔리드가 있으면 상·하류 박스의 자유면이 입구/출구만 남아
+# 분리가 필요 없음. 남겨두면 32노드 병렬에서 SIGSEGV 를 유발했음(실측).
 
 def _match():
     """존 좌표를 face_seeds 와 최근접 매칭."""
@@ -372,7 +315,7 @@ def _match():
     bad = [k for k, (r, d) in hits.items() if d > 1.0]
     print("    임계값 1mm 초과: %s" % (bad if bad else "없음"))
     globals()["_HITS"] = hits
-step("14. face_seeds 좌표 매칭", _match)
+step("13. face_seeds 좌표 매칭", _match)
 
 def _rename():
     hits = globals().get("_HITS") or {{}}
@@ -390,15 +333,15 @@ def _rename():
             ("tui.boundary.manage.name(old, key)",
              lambda r=r, key=key: TUI().boundary.manage.name(r["name"], key)),
         ])
-step("15. 존 이름 부여", _rename)
+step("14. 존 이름 부여", _rename)
 
 def _seeds():
     print("    face_seeds %d개" % len(FACE_SEEDS))
     for k in sorted(FACE_SEEDS):
         print("      %-16s %s" % (k, FACE_SEEDS[k]))
-step("16. face_seeds 목록", _seeds)
+step("15. face_seeds 목록", _seeds)
 
-step("17. 라벨된 메시 저장",
+step("16. 라벨된 메시 저장",
      lambda: TUI().file.write_mesh(MESH_OUT.replace(".msh", "_labeled.msh")))
 
 print("=" * 60)

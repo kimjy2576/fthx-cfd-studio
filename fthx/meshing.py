@@ -123,11 +123,12 @@ def sizing(p: FTHXParams, ms: Optional[MeshSpec] = None) -> dict:
 CALIB = {
     "source": "Fluent 2025R1 Watertight · tutorial + probe 실측",
     "K": {"core": 1.902, "ref": 0.715, "wall": 0.845,
-          "bend_f": 0.922, "bend_s": 0.975, "up": 2.901, "down": 2.296},
+          "bend_f": 0.922, "bend_s": 0.975, "up": 2.901, "down": 2.296,
+          "casing": 0.845},   # 얇은 판 → 관벽과 같은 계수로 근사
     # 두 케이스 간 편차 — 추정 불확실도
     # 두 케이스 간 편차 — 추정 불확실도
     "spread_pct": {"core": 17, "ref": 1, "wall": 1,
-                   "bend_f": 3, "bend_s": 3, "up": 40, "down": 40},
+                   "bend_f": 3, "bend_s": 3, "up": 40, "down": 40, "casing": 40},
     "caveat": ("상·하류 연장의 K 는 보정 케이스(연장 80mm)에서 뽑았음. "
                "실제로는 코어 계면에서 자라는 구간이 8~10mm 남짓이라, "
                "연장이 길수록 과대추정될 가능성이 큼. 편차를 ±40% 로 둠."),
@@ -150,8 +151,11 @@ def zone_volumes(p: FTHXParams, cs=None) -> dict:
          "up": p.domain.L_up * Hd * Ld,
          "down": p.domain.L_down * Hd * Ld}
     if not dk["sealed"]:
-        V["core"] += 0.0            # 바이패스는 core 크기로 처리
         V["bypass"] = (Hd * Ld - H * Lf) * W
+    if p.duct.wall_t > 0:           # 케이싱 (공기 도메인을 감싸는 솔리드)
+        wt = p.duct.wall_t
+        Lx = p.domain.L_up + W + p.domain.L_down
+        V["casing"] = ((Hd + 2 * wt) * (Ld + 2 * wt) - Hd * Ld) * Lx
     if cs is not None:
         from . import circuits as CQC
         bends = CQC.derive_bends(p, cs)
@@ -170,7 +174,8 @@ def estimate(p: FTHXParams, cs=None, ms: Optional[MeshSpec] = None) -> dict:
     h = {"core": s["h_air_mm"], "bypass": s["h_air_mm"],
          "ref": s["h_ref_mm"], "wall": s["h_ref_mm"],
          "bend_f": s["h_bend_mm"], "bend_s": s["h_bend_mm"],
-         "up": s["workflow_max_mm"], "down": s["workflow_max_mm"]}
+         "up": s["workflow_max_mm"], "down": s["workflow_max_mm"],
+         "casing": s["h_air_mm"]}   # 공기 도메인과 면 공유 → 공기측 크기
     K, SP = CALIB["K"], CALIB["spread_pct"]
     rows, total, lo, hi = [], 0.0, 0.0, 0.0
     for k, vol in V.items():

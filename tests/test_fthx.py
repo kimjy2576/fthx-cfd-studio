@@ -639,8 +639,10 @@ def test_tutorial_has_five_bodies_and_opposite_ports():
     p = presets.tutorial()
     assy, m = CAD.build(p)
     names = sorted(c.name for c in assy.children)
+    # 케이싱 3구간(up/core/down)이 추가되어 5 → 8 바디
     assert names == ["fluid_air_core_r01", "fluid_air_down", "fluid_air_up",
-                     "fluid_ref_r01t01", "solid_tube_r01t01"]
+                     "fluid_ref_r01t01", "solid_casing_core", "solid_casing_down",
+                     "solid_casing_up", "solid_tube_r01t01"]
     ends = {q["kind"]: q["end"] for q in m["circuits"]["ports"]}
     assert ends["inlet"] != ends["outlet"]        # 관 1개 → 반대편
     # 튜토리얼은 L_fin=L 이라 관 외벽면과 코어 구멍면이 정확히 일치해야 함
@@ -663,7 +665,7 @@ def test_probe_is_harder_than_tutorial():
     from fthx import presets
     p = presets.probe()
     assy, _ = CAD.build(p, CQC.gen_single(p))
-    assert len(assy.children) == 13
+    assert len(assy.children) == 16          # 13 + 케이싱 3
     assert p.fin_pack["z0"] > 0 and p.fin_pack["z1"] < p.tube.L
 
 
@@ -694,7 +696,9 @@ def test_sizing_scales_with_geometry():
 def test_estimator_brackets_measured_cells(name, actual):
     """Fluent 2025R1 실측값이 추정 범위 안에 들어와야 함"""
     from fthx import presets, meshing
-    p = presets.PRESETS[name]()
+    # 실측은 케이싱 도입 전에 얻은 값이므로 비교도 케이싱 없이
+    p0 = presets.PRESETS[name]()
+    p = p0.model_copy(update={"duct": p0.duct.model_copy(update={"wall_t": 0.0})})
     cs = CQC.gen_single(p) if p.domain.include_bends else None
     e = meshing.estimate(p, cs)
     assert e["low"] <= actual <= e["high"]
@@ -744,7 +748,7 @@ def test_step_body_count_matches_cad():
         pytest.skip("cadquery 필요")
     with tempfile.TemporaryDirectory() as d:
         m = CAD.export(p, outdir=d, cs=CQC.gen_single(p))
-        assert len(step_bodies(Path(m["_files"]["step"]))) == 13
+        assert len(step_bodies(Path(m["_files"]["step"]))) == 16
 
 
 @pytest.mark.parametrize("st,expect_issue", [
@@ -848,9 +852,9 @@ def test_journal_m2_labeling_section():
     assert 'MU.get_face_zones(filter="*")' in j
     assert "get_average_bounding_box_center(face_zone_id_list=[zid])" in j
     assert "get_face_zone_area(face_zone_id_list=[zid])" in j
-    assert "sep_face_zone_by_angle" in j
-    assert "13a. TUI 문자열 실행 진입점" in j          # 바디 단위 존을 면 단위로
-    assert "14. face_seeds 좌표 매칭" in j
+    # 각도 분리는 제거됨 — 케이싱이 대신하고, 32노드 병렬에서 SIGSEGV 를 유발했음
+    assert "sep_face_zone_by_angle" not in j
+    assert "13. face_seeds 좌표 매칭" in j
     assert "_labeled.msh" in j                     # 라벨된 메시 별도 저장
 
 
