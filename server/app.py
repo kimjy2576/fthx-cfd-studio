@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import fthx
-from fthx import FTHXParams, circuits as CQC, distributor as DST, presets
+from fthx import FTHXParams, circuits as CQC, distributor as DST, presets, meshing
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
@@ -313,7 +313,11 @@ PRESET_INFO = {
 
 @app.get("/api/preset")
 def preset_list():
-    return {"presets": [{"name": k, **v} for k, v in PRESET_INFO.items()]}
+    out = []
+    for k, v in PRESET_INFO.items():
+        p = presets.PRESETS[k]()
+        out.append({"name": k, **v, "sizing": meshing.sizing(p)})
+    return {"presets": out}
 
 
 def _preset_case(name: str):

@@ -1440,13 +1440,22 @@ document.querySelectorAll("#tutSeg button").forEach(b=>b.onclick=async()=>{
       return;
     }
     save(await r.blob(), `${nm==="tutorial"?"tutorial_1tube":"probe_small"}.step`);
-    const info=nm==="tutorial"
+    let sz=null;
+    try{ const pl=await (await fetch("/api/preset")).json();
+         sz=(pl.presets.find(x=>x.name===nm)||{}).sizing; }catch(e){}
+    const head=nm==="tutorial"
       ? "관 1개 · 5 바디<ul><li>fluid_air_up / core_r01 / down</li>"
         +"<li>solid_tube_r01t01</li><li>fluid_ref_r01t01</li></ul>"
-        +"Fluent Meshing 임포트 시 <b>Length Unit = mm</b>,"
-        +" Describe Geometry 에서 <b>Share Topology = All</b>."
-      : "관 3개 + 벤드 2개 · 13 바디<br>비정형 벤드 메싱까지 확인용.";
-    toast("튜토리얼 STEP 내려받음", info);
+      : "관 3개 + 벤드 2개 · 13 바디 — imprint·비정형 벤드 메싱 확인용<br><br>";
+    const mesh = sz ? `<b>Fluent Meshing 설정</b><ul>`
+        +`<li>Length Unit = <code>mm</code></li>`
+        +`<li>Surface Mesh Min <code>${sz.workflow_min_mm}</code> /`
+        +` Max <code>${sz.workflow_max_mm}</code> mm</li>`
+        +`<li>Describe Geometry → Share Topology <code>Yes</code></li>`
+        +`<li>Add Boundary Layers → 이번엔 <code>건너뜀</code></li></ul>`
+        +`<span style="color:var(--dim)">관벽 ${sz.h_wall_mm.toFixed(3)}mm 기준.`
+        +` 이보다 굵게 잡으면 관벽에 셀이 안 들어감</span>` : "";
+    toast("튜토리얼 STEP 내려받음", head+mesh);
   }catch(e){ toast("튜토리얼 STEP 실패",
       `로컬 서버에 연결되지 않음.<br><br><code>run.bat</code> 으로 띄울 것.`, true); }
   finally{ b.textContent=old; b.disabled=false; }

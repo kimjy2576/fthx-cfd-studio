@@ -664,3 +664,22 @@ def test_probe_is_harder_than_tutorial():
     assy, _ = CAD.build(p, CQC.gen_single(p))
     assert len(assy.children) == 13
     assert p.fin_pack["z0"] > 0 and p.fin_pack["z1"] < p.tube.L
+
+
+# ─────────────────── 메시 사이징 유도 ───────────────────
+def test_sizing_is_derived_from_geometry(p):
+    from fthx import meshing
+    s = meshing.sizing(p)
+    assert s["h_air_mm"] == pytest.approx((p.tube.Pt - p.tube.Do) / 10)
+    assert s["h_wall_mm"] == pytest.approx((p.tube.Do - p.tube.Di) / 2 / 3)
+    assert s["h_ref_mm"] == pytest.approx(p.tube.Di / 12)
+    # 관벽이 가장 얇은 피처이므로 최소 크기를 지배해야 함
+    assert s["workflow_min_mm"] == pytest.approx(round(s["h_wall_mm"], 3))
+    assert s["workflow_min_mm"] < s["workflow_max_mm"]
+
+
+def test_sizing_scales_with_geometry():
+    from fthx import meshing
+    thin = FTHXParams(tube={"Do": 9.52, "Di": 9.0})     # 관벽 0.26mm
+    assert meshing.sizing(thin)["h_wall_mm"] < \
+           meshing.sizing(FTHXParams())["h_wall_mm"]
