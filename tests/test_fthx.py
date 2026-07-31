@@ -686,3 +686,48 @@ def test_sizing_scales_with_geometry():
     thin = FTHXParams(tube={"Do": 9.52, "Di": 9.0})     # 관벽 0.26mm
     assert meshing.sizing(thin)["h_wall_mm"] < \
            meshing.sizing(FTHXParams())["h_wall_mm"]
+
+
+# ─────────────────── C: 메시 전략 · 셀 추정 ───────────────────
+@pytest.mark.parametrize("name,actual", [("tutorial", 68641), ("probe", 164461)])
+def test_estimator_brackets_measured_cells(name, actual):
+    """Fluent 2025R1 실측값이 추정 범위 안에 들어와야 함"""
+    from fthx import presets, meshing
+    p = presets.PRESETS[name]()
+    cs = CQC.gen_single(p) if p.domain.include_bends else None
+    e = meshing.estimate(p, cs)
+    assert e["low"] <= actual <= e["high"]
+    assert abs(e["total"] / actual - 1) < 0.15          # 중앙값 ±15% 이내
+
+
+def test_wall_treatment_no_prism_needed(p):
+    """현재 사이징이 벽함수 범위(30<y+<300) 안이면 프리즘 불필요"""
+    from fthx import meshing
+    w = meshing.wall_treatment(p, n_circuit=4)
+    assert 30 <= w["y_plus"] <= 300
+    assert w["prism_needed"] is False
+
+
+def test_wall_treatment_flags_buffer_layer(p):
+    """유량이 크게 낮아지면 완충층에 들어가 경고해야 함"""
+    from fthx import meshing
+    w = meshing.wall_treatment(p, n_circuit=4, m_total=0.0015)
+    assert w["y_plus"] < 30
+    assert w["prism_needed"] is True
+
+
+def test_feasibility_flags_extension_dominance():
+    from fthx import meshing
+    q = FTHXParams(domain={"L_up": 132, "L_down": 440,
+                           "include_bends": True, "include_tube_fluid": True})
+    f = meshing.feasibility(q, CQC.gen_face_split(q, 4), budget=20e6)
+    assert any("상·하류" in i for i in f["issues"])
+    assert f["hint"]["save_by_halving_L_down"] > 0
+
+
+def test_estimate_zone_breakdown_sums(p):
+    from fthx import meshing
+    e = meshing.estimate(p, CQC.gen_face_split(p, 4))
+    assert sum(r["cells"] for r in e["zones"]) == pytest.approx(e["total"])
+    assert sum(r["frac"] for r in e["zones"]) == pytest.approx(1.0)
+    assert e["zones"][0]["cells"] >= e["zones"][-1]["cells"]    # 내림차순

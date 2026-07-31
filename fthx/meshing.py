@@ -112,3 +112,137 @@ def sizing(p: FTHXParams, ms: Optional[MeshSpec] = None) -> dict:
                  f"최소 크기가 {h_wall:.3f}mm 여야 함. 이보다 굵게 잡으면 "
                  f"관벽에 셀이 안 들어가 conjugate 열전달이 성립하지 않음."),
     }
+
+
+# ══════════════════════════════════════════════════════════════════
+#  셀 수 추정 — Fluent 실측 보정
+# ══════════════════════════════════════════════════════════════════
+# tutorial(관1개, 68,641셀) 과 probe(관3개+벤드2, 164,461셀) 를 Fluent 2025R1
+# 로 실제 메싱해 얻은 패킹계수.  cells = K · V / h³
+# 등방 h³ 나눗셈만으로는 성장·근접 세분화를 못 담기 때문에 필요함.
+CALIB = {
+    "source": "Fluent 2025R1 Watertight · tutorial + probe 실측",
+    "K": {"core": 1.902, "ref": 0.715, "wall": 0.845,
+          "bend_f": 0.922, "bend_s": 0.975, "up": 2.901, "down": 2.296},
+    # 두 케이스 간 편차 — 추정 불확실도
+    # 두 케이스 간 편차 — 추정 불확실도
+    "spread_pct": {"core": 17, "ref": 1, "wall": 1,
+                   "bend_f": 3, "bend_s": 3, "up": 40, "down": 40},
+    "caveat": ("상·하류 연장의 K 는 보정 케이스(연장 80mm)에서 뽑았음. "
+               "실제로는 코어 계면에서 자라는 구간이 8~10mm 남짓이라, "
+               "연장이 길수록 과대추정될 가능성이 큼. 편차를 ±40% 로 둠."),
+}
+
+
+def zone_volumes(p: FTHXParams, cs=None) -> dict:
+    """존 클래스별 체적 [mm³]."""
+    t, b = p.tube, p.fin_pack
+    W, H, Lf = b["x1"] - b["x0"], b["y1"] - b["y0"], b["L_fin"]
+    n = t.Nr * t.Nt
+    A_in = math.pi / 4 * t.Di ** 2
+    A_wall = math.pi / 4 * (t.Do ** 2 - t.Di ** 2)
+    dk = p.duct_box
+    Hd, Ld = dk["y1"] - dk["y0"], dk["z1"] - dk["z0"]
+
+    V = {"core": W * H * Lf - n * math.pi / 4 * t.Do ** 2 * Lf,
+         "ref": n * A_in * t.L,
+         "wall": n * A_wall * t.L,
+         "up": p.domain.L_up * Hd * Ld,
+         "down": p.domain.L_down * Hd * Ld}
+    if not dk["sealed"]:
+        V["core"] += 0.0            # 바이패스는 core 크기로 처리
+        V["bypass"] = (Hd * Ld - H * Lf) * W
+    if cs is not None:
+        from . import circuits as CQC
+        bends = CQC.derive_bends(p, cs)
+        CQC.resolve_standoff(p, bends)
+        Lb = sum(b_.path_len for b_ in bends)
+        V["bend_f"] = Lb * A_in
+        V["bend_s"] = Lb * A_wall
+    return V
+
+
+def estimate(p: FTHXParams, cs=None, ms: Optional[MeshSpec] = None) -> dict:
+    """실측 보정된 셀 수 추정. 등방 h³ 만 쓰던 기존 추정과 달리
+       성장·근접 세분화를 패킹계수로 반영함."""
+    s = sizing(p, ms)
+    V = zone_volumes(p, cs)
+    h = {"core": s["h_air_mm"], "bypass": s["h_air_mm"],
+         "ref": s["h_ref_mm"], "wall": s["h_ref_mm"],
+         "bend_f": s["h_bend_mm"], "bend_s": s["h_bend_mm"],
+         "up": s["workflow_max_mm"], "down": s["workflow_max_mm"]}
+    K, SP = CALIB["K"], CALIB["spread_pct"]
+    rows, total, lo, hi = [], 0.0, 0.0, 0.0
+    for k, vol in V.items():
+        kk = K.get(k, K["core"])
+        sp = SP.get(k, 20) / 100.0
+        c = kk * vol / h[k] ** 3
+        rows.append({"zone": k, "V_mm3": vol, "h_mm": h[k],
+                     "K": kk, "cells": c, "spread_pct": SP.get(k, 20)})
+        total += c
+        lo += c * (1 - sp)
+        hi += c * (1 + sp)
+    rows.sort(key=lambda r: -r["cells"])
+    for r in rows:
+        r["frac"] = r["cells"] / total if total else 0.0
+    return {"calibration": CALIB["source"], "sizing": s,
+            "zones": rows, "total": total, "low": lo, "high": hi,
+            "note": "K·V/h³ (Fluent 실측 보정). 관 관련 존은 ±1%, "
+                    "상·하류 연장은 ±30% 편차"}
+
+
+def wall_treatment(p: FTHXParams, n_circuit: int = 4,
+                   fluid=None, m_total: Optional[float] = None) -> dict:
+    """관내 y+ 판정. 프리즘이 필요한지 여기서 결정됨."""
+    from . import distributor as DST
+    fl = fluid or DST.Fluid(p.operating.ref.fluid, p.operating.ref.T_sat_in, 1.0)
+    rho, mu = fl.props()
+    m = (m_total or p.operating.ref.m_total) / max(1, n_circuit)
+    D = p.tube.Di / 1000.0
+    A = math.pi * D * D / 4.0
+    v = m / (rho * A)
+    Re = rho * v * D / mu
+    f = DST.churchill_f(Re, 1.5e-6 / D)
+    u_tau = math.sqrt(f / 8.0 * v * v)
+    h1 = sizing(p)["h_ref_mm"]                    # 프리즘 없을 때 첫 셀
+    y_plus = (h1 / 2 / 1000.0) * u_tau / (mu / rho)
+    if y_plus > 300:
+        verdict, need = "벽함수 상한 초과", "셀을 더 촘촘히"
+    elif y_plus >= 30:
+        verdict, need = "벽함수 적용 가능", "프리즘 불필요"
+    elif y_plus > 5:
+        verdict, need = "완충층 — 피해야 함", "프리즘으로 y+<5 또는 >30 으로"
+    else:
+        verdict, need = "저Re 해상", "Enhanced Wall Treatment"
+    return {"n_circuit": n_circuit, "m_per_circuit_kgs": m, "v_ms": v, "Re": Re,
+            "u_tau_ms": u_tau, "first_cell_mm": h1, "y_plus": y_plus,
+            "verdict": verdict, "action": need,
+            "prism_needed": not (30 <= y_plus <= 300)}
+
+
+def feasibility(p: FTHXParams, cs=None, budget: float = 20e6,
+                ms: Optional[MeshSpec] = None) -> dict:
+    """실현가능성 게이트."""
+    e = estimate(p, cs, ms)
+    s = e["sizing"]
+    issues = []
+    if e["high"] > budget:
+        issues.append(f"셀 예산 초과 가능: 최대 추정 {e['high']/1e6:.1f}M > "
+                      f"{budget/1e6:.0f}M")
+    if s["wall"]["strategy"] == "resolved":
+        issues.append("관벽 Bi>0.01 — 두께 방향 실해상 필요, 셀 급증 예상")
+    ext = sum(r["cells"] for r in e["zones"] if r["zone"] in ("up", "down"))
+    if ext / e["total"] > 0.25:
+        issues.append(f"상·하류 연장이 전체의 {ext/e['total']*100:.0f}% — "
+                      "L_down 축소나 Max size 증가 검토")
+    if e["total"] > 0:
+        ext_cells = sum(r["cells"] for r in e["zones"] if r["zone"] in ("up", "down"))
+        per_mm = ext_cells / max(1e-9, p.domain.L_up + p.domain.L_down)
+        issues_hint = {"ext_cells_per_mm": per_mm,
+                       "L_down_mm": p.domain.L_down,
+                       "save_by_halving_L_down": per_mm * p.domain.L_down / 2}
+    else:
+        issues_hint = {}
+    return {"ok": not issues, "issues": issues, "hint": issues_hint,
+            "total_M": e["total"] / 1e6, "range_M": [e["low"] / 1e6, e["high"] / 1e6],
+            "budget_M": budget / 1e6, "estimate": e}

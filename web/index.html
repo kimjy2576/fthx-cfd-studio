@@ -451,6 +451,42 @@ function bypassMetrics(H,L){
   return o;
 }
 
+/* ── 셀 수 추정 — Fluent 2025R1 실측 보정 ──────────────────────
+   cells = K · V/h³ .  등방 h³ 만으로는 성장·근접 세분화를 못 담음.
+   K 는 tutorial(68,641셀)·probe(164,461셀) 실측에서 역산. 서버와 동일 */
+const CAL_K={core:1.902,bypass:1.902,ref:0.715,wall:0.845,
+             bend_f:0.922,bend_s:0.975,up:2.901,down:2.296};
+const CAL_SP={core:17,bypass:20,ref:1,wall:1,bend_f:0,bend_s:0,up:30,down:35};
+
+function meshSizing(){
+  const N_gap=10, N_d=12, N_arc=24;
+  const h_air=(P.Pt-P.Do)/N_gap, h_ref=P.Di/N_d;
+  const h_bend=Math.min(h_ref, Math.PI*(P.Pt/2)/N_arc);
+  return {h_air, h_ref, h_bend, min:+h_ref.toFixed(3), max:+(h_air*2).toFixed(3)};
+}
+function cellEstimate(){
+  const b=bbox(), k=duct(), s=meshSizing(), n=P.Nr*P.Nt;
+  const W=b.x1-b.x0, H=b.y1-b.y0, Lf=b.z1-b.z0;
+  const Hd=k.y1-k.y0, Ld=k.z1-k.z0;
+  const Ain=Math.PI*P.Di*P.Di/4, Aw=Math.PI*(P.Do*P.Do-P.Di*P.Di)/4;
+  const V={core:W*H*Lf-n*Math.PI*P.Do*P.Do/4*Lf, ref:n*Ain*P.L, wall:n*Aw*P.L,
+           up:P.L_up*Hd*Ld, down:P.L_down*Hd*Ld};
+  if(!k.sealed) V.bypass=(Hd*Ld-H*Lf)*W;
+  const Lb=CIRC.bends.reduce((a,x)=>a+pathLen(x),0);
+  if(Lb>0){ V.bend_f=Lb*Ain; V.bend_s=Lb*Aw; }
+  const H_={core:s.h_air,bypass:s.h_air,ref:s.h_ref,wall:s.h_ref,
+            bend_f:s.h_bend,bend_s:s.h_bend,up:s.max,down:s.max};
+  let tot=0, lo=0, hi=0; const rows=[];
+  for(const z in V){ const c=(CAL_K[z]||1)*V[z]/Math.pow(H_[z],3);
+    const sp=(CAL_SP[z]||20)/100;
+    rows.push({zone:z,cells:c}); tot+=c; lo+=c*(1-sp); hi+=c*(1+sp); }
+  rows.sort((a,b)=>b.cells-a.cells);
+  rows.forEach(r=>r.frac=r.cells/tot);
+  const ext=rows.filter(r=>r.zone==="up"||r.zone==="down")
+                .reduce((a,r)=>a+r.cells,0);
+  return {rows,total:tot,low:lo,high:hi,sizing:s,ext_frac:ext/tot};
+}
+
 /* ---------- 유동 도메인 자동 산정 ---------- */
 function autoExtents(){
   const b=bbox(), W=b.x1-b.x0;
@@ -1128,8 +1164,13 @@ function paint(){
     <div>수력직경 D<sub>h</sub> <b>${fmt(d.D_h,2)}</b> mm</div>
     <div>칼라경 D<sub>c</sub> <b>${fmt(d.D_c,2)}</b> mm · Re<sub>Dc</sub> <b>${fmt(reDc(),0)}</b></div>`;
 
-  document.getElementById("zoneSummary").textContent =
-    `총 ${fmt(P.L_up+d.W+P.L_down,0)} mm · 존 ${Z.list.length}개 · 개략 ${big(Z.total)} 셀 (프리즘 ${big(Z.prism)} 포함)`;
+  const CE=cellEstimate();
+  document.getElementById("zoneSummary").innerHTML =
+    `총 ${fmt(P.L_up+d.W+P.L_down,0)} mm · 존 ${Z.list.length}개 · `
+    + `<b>${big(CE.total)} 셀</b> <span style="color:var(--dimmer)">`
+    + `(${big(CE.low)}~${big(CE.high)}, Fluent 실측 보정)</span>`
+    + (CE.ext_frac>0.25 ? ` <span style="color:var(--warn)">· 상·하류가 `
+        + `${(CE.ext_frac*100).toFixed(0)}%</span>` : "");
 
   const tot=Z.list.reduce((s,z)=>s+z.dx,0);
   document.getElementById("zoneBar").innerHTML=Z.list.map(z=>
