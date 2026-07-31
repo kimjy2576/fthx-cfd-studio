@@ -852,3 +852,40 @@ def test_journal_m2_labeling_section():
     assert "13a. TUI 문자열 실행 진입점" in j          # 바디 단위 존을 면 단위로
     assert "14. face_seeds 좌표 매칭" in j
     assert "_labeled.msh" in j                     # 라벨된 메시 별도 저장
+
+
+# ─────────────────── 케이싱 — 입출구 단독 존 만들기 ───────────────────
+@needs_cad
+@pytest.mark.parametrize("name", ["tutorial", "probe"])
+def test_casing_leaves_only_inlet_outlet_free(name):
+    """Fluent 은 인접 관계가 같은 면을 한 존으로 묶음.
+       케이싱이 없으면 상·하류 박스의 자유면(입구+측벽4)이 한 덩어리가 되어
+       입구를 특정할 수 없음. 케이싱을 두면 자유면이 입구/출구만 남음."""
+    from fthx import presets
+    p = presets.PRESETS[name]()
+    assert p.duct.wall_t > 0
+    cs = CQC.gen_single(p) if p.domain.include_bends else None
+    assy, m = CAD.build(p, cs)
+    B = {c.name: c.obj for c in assy.children}
+    assert any(k.startswith("solid_casing_") for k in B)
+
+    def free_faces(nm):
+        others = [v for k, v in B.items() if k != nm]
+        out = []
+        for f in B[nm].Faces():
+            c = f.Center()
+            shared = any(abs(f.Area() - g.Area()) < 1e-6
+                         and (c - g.Center()).Length < 1e-6
+                         for o in others for g in o.Faces())
+            if not shared:
+                out.append((f.Area(), (c.x, c.y, c.z)))
+        return out
+
+    for body, seed_key in (("fluid_air_up", "air_inlet"),
+                           ("fluid_air_down", "air_outlet")):
+        ff = free_faces(body)
+        assert len(ff) == 1, f"{body} 자유면이 {len(ff)}개 — 1개여야 함"
+        _, c = ff[0]
+        seed = m["face_seeds"][seed_key]
+        d = sum((c[i] - seed[i]) ** 2 for i in range(3)) ** 0.5
+        assert d < 1e-6, f"{seed_key} seed 와 자유면 중심 거리 {d}"

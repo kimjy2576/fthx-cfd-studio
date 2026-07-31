@@ -88,6 +88,10 @@ class DuctSpec(BaseModel):
        gap = 0 이면 완전 밀폐(기존 동작)."""
     gap_y: float = Field(0.0, ge=0, description="핀 가장자리 ~ 덕트 벽 (상·하 각각) [mm]")
     gap_z: float = Field(0.0, ge=0, description="핀 팩 끝 ~ 덕트 벽 (양단 각각) [mm]")
+    wall_t: float = Field(0.0, ge=0,
+        description="케이싱 두께 [mm]. >0 이면 공기 도메인을 감싸는 솔리드 생성. "
+                    "Fluent 은 인접 관계가 같은 면을 한 존으로 묶으므로, 케이싱이 "
+                    "있으면 상·하류 박스의 자유면이 입구/출구만 남아 단독 존이 됨")
 
     @property
     def sealed(self) -> bool:

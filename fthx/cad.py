@@ -275,6 +275,27 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
                         "seed": [cx_, cy_, zc + sgn * sp],
                         "thickness_mm": plenum.jump_thick})
 
+    # ---- 케이싱 (공기 도메인을 감싸는 솔리드) ----
+    # Fluent 은 인접 관계가 같은 면을 한 존으로 묶음. 케이싱이 없으면
+    # 상·하류 박스의 자유면(입구+측벽4)이 한 덩어리가 되어 입구를 특정할 수 없음.
+    # 케이싱을 두면 측벽이 계면이 되고 입구/출구만 자유면으로 남음.
+    if p.duct.wall_t > 0:
+        w = p.duct.wall_t
+        # 공기 도메인 구간에 맞춰 분할 — 각 구간이 해당 공기 바디와
+        # 정확히 일치하는 면을 갖게 되어 imprint 없이 계면이 성립함
+        segs = []
+        if d.L_up > 0:
+            segs.append(("up", x0 - d.L_up, x0))
+        segs.append(("core", x0, x1))
+        if d.L_down > 0:
+            segs.append(("down", x1, x1 + d.L_down))
+        for tag, a, b_ in segs:
+            inner = _box(a, b_, dk["y0"], dk["y1"], dk["z0"], dk["z1"])
+            outer = _box(a, b_, dk["y0"] - w, dk["y1"] + w,
+                         dk["z0"] - w, dk["z1"] + w)
+            assy.add(outer.cut(inner), name=f"solid_casing_{tag}",
+                     color=cq.Color(0.6, 0.6, 0.62))
+
     # ---- z 대칭 반쪽 모델 ----
     if p.sym_z is not None:
         zc = p.sym_z

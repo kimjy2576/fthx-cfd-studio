@@ -240,6 +240,9 @@ def _try_all(label, trials):
     for name, fn in trials:
         try:
             out = fn()
+            if out is False:          # run_menu 는 실패 시 False 를 반환함
+                print("    [--] " + name + " -> False (명령 실패)")
+                continue
             print("    [OK] " + name + " -> " + str(out)[:300])
             return name, out
         except Exception as e:
@@ -348,6 +351,27 @@ def _separate():
     print("    분리 성공 %d개" % done)
 step("13b. 존 각도 분리 (40도)", _separate)
 
+def _match():
+    """존 좌표를 face_seeds 와 최근접 매칭."""
+    rows = zone_table()
+    globals()["_ROWS2"] = rows
+    print("    면 존 %d개" % len(rows))
+    cand = [r for r in rows if r["c"]]
+    hits = {{}}
+    for key, seed in FACE_SEEDS.items():
+        best, bd = None, 1e18
+        for r in cand:
+            c = r["c"]
+            d = ((c[0]-seed[0])**2 + (c[1]-seed[1])**2 + (c[2]-seed[2])**2) ** 0.5
+            if d < bd:
+                best, bd = r, d
+        hits[key] = (best, bd)
+        print("    %-18s -> id %-8s %-40s  거리 %.3f mm" %
+              (key, best["id"] if best else "?",
+               str(best["name"])[:40] if best else "?", bd))
+    bad = [k for k, (r, d) in hits.items() if d > 1.0]
+    print("    임계값 1mm 초과: %s" % (bad if bad else "없음"))
+    globals()["_HITS"] = hits
 step("14. face_seeds 좌표 매칭", _match)
 
 def _rename():

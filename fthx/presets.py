@@ -5,7 +5,7 @@ probe    : 관 3개 + 벤드 2개. 튜토리얼 통과 후 벤드 메싱을 확�
 """
 from __future__ import annotations
 
-from .params import FTHXParams, TubeSpec, FinSpec, DomainSpec
+from .params import FTHXParams, TubeSpec, FinSpec, DomainSpec, DuctSpec
 
 
 def tutorial() -> FTHXParams:
@@ -31,6 +31,7 @@ def tutorial() -> FTHXParams:
         fin=FinSpec(FPI=14, t_f=0.115),        # L_fin=None → 관 전장 = 100
         domain=DomainSpec(L_up=40, L_down=80,
                           include_bends=False, include_tube_fluid=True),
+        duct=DuctSpec(wall_t=2.0),      # 케이싱 — 입출구 면이 단독 존이 되게 함
         export={"write_pcurves": False},
     )
 
@@ -49,6 +50,7 @@ def probe() -> FTHXParams:
         fin=FinSpec(FPI=14, t_f=0.115, L_fin=80),
         domain=DomainSpec(L_up=40, L_down=80,
                           include_bends=True, include_tube_fluid=True),
+        duct=DuctSpec(wall_t=2.0),      # 케이싱 — 입출구 면이 단독 존이 되게 함
         export={"write_pcurves": False},
     )
 
