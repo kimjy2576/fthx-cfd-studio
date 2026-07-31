@@ -287,69 +287,64 @@ def _dump_zones():
                ("%.1f" % r["area"]) if r["area"] else "?"))
 step("12. 면 존 표 (id/이름/좌표/면적)", _dump_zones)
 
-def _tui_tree():
-    """분리 명령 경로 탐색. boundary.manage.separate 는 없음(실측).
-       TUI 트리를 직접 훑어 sep/separate 계열을 찾음."""
-    tui = TUI()
-    for path in ("boundary", "boundary.manage", "boundary.improve",
-                 "boundary.modify", "mesh", "mesh.modify_zones"):
-        o = tui
-        ok = True
-        for part in path.split("."):
-            o = getattr(o, part, None)
-            if o is None:
-                ok = False
-                break
-        if not ok:
-            print("    [--] %s 없음" % path)
+def _tui_exec():
+    """TUI 명령을 문자열로 실행하는 진입점 탐색.
+
+    dir() 로 TUI 트리를 훑는 방식은 신뢰할 수 없음 — getattr 이 존재하지 않는
+    이름에도 빈 메뉴를 돌려줌(boundary.improve 가 0개, sep_face_zone_by_angle
+    이 호출 불가 메뉴로 나온 이유). 문자열 실행이 되면 문서화된 TUI 명령을
+    그대로 쓸 수 있어 탐색이 끝남.
+    """
+    g = globals()
+    for nm in ("run_menu", "cx", "flapi", "PyTUI", "flglobals"):
+        o = g.get(nm)
+        print("    %-12s %s" % (nm, type(o)))
+        if o is None:
             continue
         ns = [n for n in dir(o) if not n.startswith("_")]
-        hit = [n for n in ns if "sep" in n.lower() or "angle" in n.lower()]
-        print("    [OK] %-22s 항목 %d개   분리계열: %s" %
-              (path, len(ns), hit if hit else "없음"))
-        if path == "boundary":
-            for i in range(0, len(ns), 6):
-                print("         " + ", ".join(ns[i:i + 6]))
-step("13a. TUI 트리에서 분리 명령 찾기", _tui_tree)
+        hit = [n for n in ns
+               if any(k in n.lower() for k in ("exec", "eval", "menu", "tui",
+                                               "scheme", "command", "string"))]
+        print("                 관련: %s" % (hit[:14] if hit else "없음"))
+    LIST = "/boundary/manage/list"
+    SCM = "(ti-menu-load-string " + '"' + LIST + '"' + ")"
+    _try_all("TUI 문자열 실행", [
+        ("run_menu(LIST)", lambda: g["run_menu"](LIST)),
+        ("run_menu(LIST[1:])", lambda: g["run_menu"](LIST[1:])),
+        ("cx.eval(SCM)", lambda: g["cx"].eval(SCM)),
+        ("flapi.eval(SCM)", lambda: g["flapi"].eval(SCM)),
+        ("cx.scheme_eval(SCM)", lambda: g["cx"].scheme_eval(SCM)),
+    ])
+step("13a. TUI 문자열 실행 진입점", _tui_exec)
 
 def _separate():
-    """박스형 존은 면끼리 90도이므로 40도 기준으로 쪼개면 면 단위가 됨.
-       경로 후보를 순서대로 시도하고 각각의 오류를 남김."""
-    tui = TUI()
-    rows = globals().get("_ROWS") or []
-    # 박스 외벽만 대상 — 관 끝면은 이미 단독 존이라 손댈 필요 없음
+    """박스 외벽을 각도로 분리. 문자열 실행이 되면 문서화된 경로를 그대로 씀."""
+    g = globals()
+    rows = g.get("_ROWS") or []
     targets = [r for r in rows if r["name"] and "interior" not in str(r["name"])
                and str(r["name"]).startswith("fluid_air_")
                and "-solid-" not in str(r["name"])]
     print("    분리 대상 %d개: %s" % (len(targets), [r["name"] for r in targets]))
-    paths = ("boundary.separate.sep_face_zone_by_angle",
-             "boundary.separate.separate_face_zone_by_angle",
-             "boundary.sep_face_zone_by_angle",
-             "mesh.modify_zones.separate_face_zone_by_angle")
+    rm = g.get("run_menu")
     done = 0
     for r in targets:
-        for path in paths:
-            o, ok = tui, True
-            for part in path.split("."):
-                o = getattr(o, part, None)
-                if o is None:
-                    ok = False
-                    break
-            if not ok:
-                print("    [--] %s : 경로 없음 (%s)" % (path, r["name"]))
-                continue
-            for args in ((r["name"], 40), (r["name"], 40, "yes")):
-                try:
-                    o(*args)
-                    print("    [OK] %s %s" % (path, str(args)[:60]))
-                    done += 1
-                    break
-                except Exception as e:
-                    print("    [--] %s%s : %s: %s" %
-                          (path, str(args)[:40], type(e).__name__, str(e)[:80]))
-            else:
-                continue
-            break
+        nm = r["name"]
+        cands = []
+        if rm:
+            cands += [
+                ("run_menu sep-face-zone-by-angle",
+                 lambda nm=nm: rm("/boundary/separate/sep-face-zone-by-angle %s 40 ()"
+                                  % nm)),
+                ("run_menu separate-face-zone-by-angle",
+                 lambda nm=nm: rm("/mesh/modify-zones/separate-face-zone-by-angle "
+                                  "%s 40" % nm)),
+            ]
+        cands.append(("mu.separate_face_zones_by_cell_neighbor",
+                      lambda nm=nm: MU.separate_face_zones_by_cell_neighbor(
+                          face_zone_name_list=[nm])))
+        got, _ = _try_all("분리 %s" % nm, cands)
+        if got:
+            done += 1
     print("    분리 성공 %d개" % done)
 step("13b. 존 각도 분리 (40도)", _separate)
 
