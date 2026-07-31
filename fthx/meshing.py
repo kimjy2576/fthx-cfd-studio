@@ -23,6 +23,9 @@ class MeshSpec(BaseModel):
     N_d: int = Field(12, ge=4, description="관 내경 분할 수")
     N_arc: int = Field(24, ge=8, description="벤드 반원 분할 수")
     growth: float = Field(1.2, gt=1, description="성장률")
+    cells_per_gap: int = Field(1, ge=1,
+        description="Fluent Proximity 의 '틈새당 셀 수'. 기본 3 이면 관벽을 "
+                    "틈새로 보고 t/3 까지 자동 세분화해 이웃 존까지 폭증함")
 
 
 def sizing(p: FTHXParams, ms: Optional[MeshSpec] = None) -> dict:
@@ -79,7 +82,23 @@ def sizing(p: FTHXParams, ms: Optional[MeshSpec] = None) -> dict:
         "alternative": "shell conduction (관벽 바디를 아예 빼고 벽면 두께로 처리)",
     }
 
+    # ── 표면 메시 작업에 반드시 지정할 값 ─────────────────────
+    # Fluent 의 Proximity 는 기본이 '틈새당 셀 3개'. 관벽(0.65mm)을 틈새로
+    # 인식해 자동으로 t/3 까지 세분화함. 2025R1 실측: Local Sizing 을 지워도
+    # 셀이 1.31M 로 그대로였던 원인이 이것이었음.
+    # Min Size 가 하한선이므로 이것을 올려두면 Proximity 요구도 막힘.
+    surface = {
+        "min_mm": round(h_min, 3),
+        "max_mm": round(h_max, 3),
+        "growth": ms.growth,
+        "cells_per_gap": ms.cells_per_gap,
+        "why_min": (f"관벽 {t_wall:.2f}mm 가 '틈새'로 인식돼 자동 세분화되는 것을 "
+                    f"막는 하한선. 이 값을 {round(h_min,3)} 미만으로 두면 "
+                    f"Proximity 가 t/cells_per_gap 까지 내려감"),
+    }
+
     return {
+        "surface": surface,
         "wall": wall,
         "local_sizing": local,
         "spec": ms.model_dump(),

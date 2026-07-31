@@ -1451,6 +1451,9 @@ document.querySelectorAll("#tutSeg button").forEach(b=>b.onclick=async()=>{
         +`<li>Length Unit = <code>mm</code></li>`
         +`<li>Surface Mesh Min <code>${sz.workflow_min_mm}</code> /`
         +` Max <code>${sz.workflow_max_mm}</code> mm</li>`
+        +`<li><b>Cells Per Gap = <code>${sz.surface.cells_per_gap}</code></b>`
+        +` <span style="color:var(--dim)">(기본 3 이면 관벽을 틈새로 보고`
+        +` 자동 세분화 → 셀 폭증)</span></li>`
         +`<li>Describe Geometry → Share Topology <code>Yes</code></li>`
         +`<li>Add Boundary Layers → 이번엔 <code>건너뜀</code></li></ul>`
         +`<b>Add Local Sizing</b><ul>`
