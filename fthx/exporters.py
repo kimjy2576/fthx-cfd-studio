@@ -45,6 +45,10 @@ def fluent_journal(p: FTHXParams, step_name: str = "model.step",
 #
 # Cells Per Gap = {su["cells_per_gap"]} 가 핵심임. 기본 3 이면 관벽({s["wall"]["t_wall_mm"]:.2f}mm)을
 # 틈새로 보고 t/3 까지 자동 세분화해 셀이 20배로 늘어남 (2025R1 실측).
+#
+# ⚠ 코어 수가 셀 수에 영향을 줌. 병렬 분할 경계에서 메시가 달라지기 때문임.
+#   probe 실측: 4코어 164,461 → 32코어 229,026 (+39%).
+#   케이스 간 비교를 할 때는 -t 값을 고정할 것.
 
 import traceback
 
@@ -82,6 +86,25 @@ def set_args(t, d):
         t.Arguments.set_state(d)
     except Exception:
         t.Arguments = d
+
+def TUI():
+    """Fluent 내장 파이썬에서 TUI 진입점 이름이 전역이 아닐 수 있음.
+       2025R1 실측: 'tui' 는 NameError. 후보를 순서대로 찾음."""
+    g = globals()
+    for nm in ("tui", "meshing", "solver", "session", "root"):
+        o = g.get(nm)
+        if o is None:
+            continue
+        if nm == "tui":
+            return o
+        t = getattr(o, "tui", None)
+        if t is not None:
+            return t
+    for nm in ("PyMenu", "main_menu"):
+        if nm in g:
+            return g[nm]
+    raise NameError("TUI 진입점을 찾지 못함. globals: "
+                    + ", ".join(sorted(k for k in g if not k.startswith("_")))[:400])
 
 # ── 워크플로우 ─────────────────────────────────────────────
 step("InitializeWorkflow",
@@ -148,9 +171,42 @@ def _volume():
 step("7. Generate the Volume Mesh", _volume)
 
 # ── 결과 ───────────────────────────────────────────────────
-step("8. check-mesh", lambda: tui.mesh.check_mesh())
-step("9. boundary list", lambda: tui.boundary.manage.list())
-step("10. write mesh", lambda: tui.file.write_mesh(MESH_OUT))
+# 8~10 단계: TUI 진입점을 찾아 결과 확인 + 메시 저장
+def _check():   TUI().mesh.check_mesh()
+def _zones():   TUI().boundary.manage.list()
+def _write():   TUI().file.write_mesh(MESH_OUT)
+
+# 저장은 반드시 되어야 하므로 대안 경로도 시도
+def _write_any():
+    errs = []
+    for label, fn in (
+            ("TUI().file.write_mesh", _write),
+            ("meshing.tui.file.write_mesh",
+             lambda: globals()["meshing"].tui.file.write_mesh(MESH_OUT)),
+            ("session.tui.file.write_mesh",
+             lambda: globals()["session"].tui.file.write_mesh(MESH_OUT)),
+            ("workflow parent", lambda: workflow._parent.tui.file.write_mesh(MESH_OUT)),
+    ):
+        try:
+            fn()
+            print("    저장 경로: " + label)
+            return
+        except Exception as e:
+            errs.append(label + " -> " + type(e).__name__ + ": " + str(e)[:120])
+    print("    !! 메시 저장 실패 — 시도한 경로:")
+    for e in errs:
+        print("       " + e)
+    raise RuntimeError("메시 저장 실패")
+
+step("8. check-mesh", _check)
+step("9. boundary list", _zones)
+step("10. write mesh", _write_any)
+
+# 전역 이름 덤프 — 위가 실패하면 이 목록으로 경로를 확정할 수 있음
+def _dump():
+    ns = sorted(k for k in globals() if not k.startswith("_"))
+    print("    globals: " + ", ".join(ns))
+step("11. 전역 이름 덤프", _dump)
 
 print("=" * 60)
 print("기대 셀 존 수: " + str(EXPECT_ZONES))
@@ -194,6 +250,10 @@ fluent 3d -meshing -g -t8 -i mesh.py
 LSF 큐에 제출되고 `Job <번호> is submitted to queue` 가 뜸.
 허용 코어 수는 **1 / 2 / 4 / 8 / 32 / 128 / 256 / 512** 중 하나여야 함.
 
+> ⚠ **코어 수가 셀 수에 영향을 줌.** 병렬 분할 경계에서 메시가 달라지기 때문임.
+> probe 실측: 4코어 164,461 → 32코어 229,026 (**+39%**).
+> 케이스 간 비교를 할 때는 `-t` 값을 반드시 고정할 것.
+
 ## 2) 상태 확인
 
 ```bash
@@ -211,6 +271,9 @@ grep -E "^(>>>|<<<)" $(ls -t *.trn | head -1)
 
 # 셀 수·품질
 grep -E "cells were created|Orthogonal Quality|Total Number of Cell Zones" $(ls -t *.trn | head -1)
+
+# 메시 파일이 저장됐는지
+ls -lh mesh.msh.h5
 
 # 오류
 grep -iE "error|warning" $(ls -t *.trn | head -1) | head -20

@@ -809,3 +809,21 @@ def test_run_md_and_settings_have_key_values():
         assert str(s["surface"]["cells_per_gap"]) in txt
     assert "fluent 3d -meshing -g -t8 -i mesh.py" in md
     assert "13" in md                                 # 기대 셀 존 수
+
+
+def test_journal_has_tui_fallbacks():
+    """2025R1 실측: 'tui' 가 전역에 없어 8~10단계가 실패했음"""
+    from fthx import presets, exporters
+    j = exporters.fluent_journal(presets.probe())
+    assert "def TUI():" in j
+    assert "TUI 진입점을 찾지 못함" in j
+    assert "_write_any" in j                    # 저장은 대안 경로까지
+    assert "11. 전역 이름 덤프" in j            # 실패 시 진단
+
+
+def test_run_md_warns_core_count_affects_cells():
+    from fthx import presets, exporters, meshing
+    p = presets.probe()
+    md = exporters.run_md(p, est=meshing.estimate(p), n_bodies=13)
+    assert "코어 수가 셀 수에 영향" in md
+    assert "229,026" in md
