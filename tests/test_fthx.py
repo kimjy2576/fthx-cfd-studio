@@ -775,3 +775,37 @@ def test_retry_ladder_monotonically_refines():
         n = meshing.estimate(p, None, ms)["total"]
         assert n >= prev, f"{label} 에서 셀이 줄어듦"
         prev = n
+
+
+# ─────────────────── 해석 패키지 내보내기 ───────────────────
+def test_fluent_journal_is_valid_python():
+    import ast
+    from fthx import presets, exporters
+    for name in ("tutorial", "probe"):
+        j = exporters.fluent_journal(presets.PRESETS[name](), n_bodies=13)
+        ast.parse(j)                                  # 문법 오류 없어야 함
+        assert "CELLS_PER_GAP = 1" in j               # M0 실측 반영
+        assert "Watertight Geometry" in j
+        assert "InvokeShareTopology" in j
+
+
+def test_journal_embeds_derived_sizing():
+    from fthx import presets, exporters, meshing
+    p = presets.probe()
+    s = meshing.sizing(p)
+    j = exporters.fluent_journal(p)
+    assert f"MIN_SIZE    = {s['workflow_min_mm']}" in j
+    assert f"MAX_SIZE    = {s['workflow_max_mm']}" in j
+
+
+def test_run_md_and_settings_have_key_values():
+    from fthx import presets, exporters, meshing
+    p = presets.probe()
+    s = meshing.sizing(p)
+    md = exporters.run_md(p, est=meshing.estimate(p), n_bodies=13)
+    st = exporters.settings_txt(p, n_bodies=13)
+    for txt in (md, st):
+        assert str(s["workflow_min_mm"]) in txt
+        assert str(s["surface"]["cells_per_gap"]) in txt
+    assert "fluent 3d -meshing -g -t8 -i mesh.py" in md
+    assert "13" in md                                 # 기대 셀 존 수

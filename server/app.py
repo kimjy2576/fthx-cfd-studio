@@ -22,7 +22,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import fthx
-from fthx import FTHXParams, circuits as CQC, distributor as DST, presets, meshing
+from fthx import (FTHXParams, circuits as CQC, distributor as DST,
+                  presets, meshing, exporters)
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
@@ -340,6 +341,54 @@ def preset_step(name: str):
     meta = CAD.export(p, outdir=str(out), cs=cs)
     return FileResponse(meta["_files"]["step"], media_type="model/step",
                         filename=f"{p.name}.step")
+
+
+def _package_bytes(p: FTHXParams, cs) -> bytes:
+    """해석 패키지 zip — 서버에 아무것도 설치하지 않고 돌릴 수 있는 묶음."""
+    import io as _io
+    import re as _re
+    import zipfile
+    from fthx import cad as CAD
+
+    out = Path(tempfile.mkdtemp())
+    meta = CAD.export(p, outdir=str(out), cs=cs)
+    step = Path(meta["_files"]["step"])
+    bodies = _re.findall(r"PRODUCT\('([^']+)'", step.read_text(errors="ignore"))[1:]
+    n = len(bodies)
+    est = meshing.estimate(p, cs)
+
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("fthx_case/model.step", step.read_bytes())
+        meta.pop("_files", None)
+        z.writestr("fthx_case/case.json",
+                   json.dumps(meta, indent=2, ensure_ascii=False))
+        z.writestr("fthx_case/mesh.py",
+                   exporters.fluent_journal(p, "model.step", "mesh.msh.h5",
+                                            n_bodies=n))
+        z.writestr("fthx_case/RUN.md", exporters.run_md(p, est=est, n_bodies=n))
+        z.writestr("fthx_case/settings.txt", exporters.settings_txt(p, n_bodies=n))
+        z.writestr("fthx_case/bodies.txt", "\n".join(bodies))
+    return buf.getvalue()
+
+
+@app.post("/api/export/package")
+def export_package(req: ExportIn):
+    p = req.case.to_params()
+    cs = req.case.to_circuits()
+    data = _package_bytes(p, cs)
+    out = Path(tempfile.mkdtemp()) / f"{p.name}_fluent.zip"
+    out.write_bytes(data)
+    return FileResponse(out, media_type="application/zip", filename=out.name)
+
+
+@app.get("/api/preset/{name}/package")
+def preset_package(name: str):
+    p, cs = _preset_case(name)
+    data = _package_bytes(p, cs)
+    out = Path(tempfile.mkdtemp()) / f"{name}_fluent.zip"
+    out.write_bytes(data)
+    return FileResponse(out, media_type="application/zip", filename=out.name)
 
 
 @app.get("/api/preset/{name}/meta")

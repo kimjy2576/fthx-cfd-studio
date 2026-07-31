@@ -261,6 +261,7 @@ canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%}
       <button data-preset="tutorial" title="관 1개 · 5 바디 — 메싱 첫 시험용">관 1개</button>
       <button data-preset="probe" title="관 3개 + 벤드 2개 · 13 바디">관 3개</button>
     </div></div>
+  <button class="act" id="btnPkg" title="STEP + Fluent 저널 + 실행법 zip">해석 패키지</button>
   <button class="act" id="btnUpd" title="확인 중…">앱 업데이트</button>
   <button class="act" id="btnCirc">회로 설계</button>
   <div class="hfit"><span>뷰 맞춤</span>
@@ -1514,6 +1515,33 @@ document.querySelectorAll("#tutSeg button").forEach(b=>b.onclick=async()=>{
       `로컬 서버에 연결되지 않음.<br><br><code>run.bat</code> 으로 띄울 것.`, true); }
   finally{ b.textContent=old; b.disabled=false; }
 });
+
+/* ---- 해석 패키지 (STEP + 저널 + RUN.md) ---- */
+document.getElementById("btnPkg").onclick=async()=>{
+  const d=caseDoc(), b=document.getElementById("btnPkg"), old=b.textContent;
+  b.textContent="생성 중…"; b.disabled=true;
+  try{
+    const r=await fetch("/api/export/package",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({case:{name:d.name,tube:d.tube,fin:d.fin,
+        domain:d.domain,circuits:d.circuits}, with_plenum:false})});
+    if(!r.ok){ const j=await r.json().catch(()=>({}));
+      toast("패키지 생성 실패", String(j.detail||r.statusText)
+        +`<br><br>로컬 서버가 필요함 — <code>run.bat</code>`, true); return; }
+    save(await r.blob(), `${P.name}_fluent.zip`);
+    const sz=cellEstimate();
+    toast("해석 패키지 내려받음",
+      `<ul><li><code>model.step</code> 형상</li>`
+      +`<li><code>mesh.py</code> Fluent 내장 파이썬 저널 — <b>설치 불필요</b></li>`
+      +`<li><code>RUN.md</code> 복붙용 명령</li>`
+      +`<li><code>settings.txt</code> GUI 로 할 때 넣을 값</li></ul>`
+      +`서버에서:<br><code>unzip &amp;&amp; cd fthx_case</code><br>`
+      +`<code>fluent 3d -meshing -g -t8 -i mesh.py</code><br><br>`
+      +`<span style="color:var(--dim)">예상 ${big(sz.total)} 셀</span>`);
+  }catch(e){ toast("패키지 생성 실패",
+      `로컬 서버에 연결되지 않음. <code>run.bat</code> 으로 띄울 것.`, true); }
+  finally{ b.textContent=old; b.disabled=false; }
+};
 
 document.getElementById("btnCirc").onclick=ceOpen;
 document.getElementById("ceClose").onclick=ceClose;
