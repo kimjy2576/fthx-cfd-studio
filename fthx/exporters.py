@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 from typing import Optional
 
+import json
+
 from .params import FTHXParams
 from . import meshing
 
@@ -28,10 +30,12 @@ from . import meshing
 def fluent_journal(p: FTHXParams, step_name: str = "model.step",
                    mesh_out: str = "mesh.msh.h5",
                    ms: Optional[meshing.MeshSpec] = None,
-                   n_bodies: Optional[int] = None) -> str:
+                   n_bodies: Optional[int] = None,
+                   face_seeds: Optional[dict] = None) -> str:
     s = meshing.sizing(p, ms)
     su = s["surface"]
     exp = n_bodies if n_bodies is not None else 0
+    seeds = json.dumps(face_seeds or {}, ensure_ascii=False)
 
     return f'''# -*- coding: utf-8 -*-
 # FT-HX CFD Studio — Fluent Meshing 저널 (내장 파이썬)
@@ -207,6 +211,48 @@ def _dump():
     ns = sorted(k for k in globals() if not k.startswith("_"))
     print("    globals: " + ", ".join(ns))
 step("11. 전역 이름 덤프", _dump)
+
+# ── M2 준비: 경계 라벨링 API 탐색 ─────────────────────────
+# 목표는 face_seeds 좌표로 면 존을 찾아 이름·타입을 붙이는 것.
+# 지금은 바디 단위로 묶여 있을 수 있어(예: fluid_air_up-solid:1 안에
+# 입구면과 측벽이 함께) 면 단위 분리가 필요한지 여기서 판정함.
+FACE_SEEDS = {seeds}
+
+def _mu_dir():
+    mu = globals().get("meshing_utilities")
+    print("    meshing_utilities type: " + str(type(mu)))
+    ns = [n for n in dir(mu) if not n.startswith("_")]
+    print("    함수 %d개:" % len(ns))
+    for i in range(0, len(ns), 6):
+        print("      " + ", ".join(ns[i:i + 6]))
+step("12. meshing_utilities 목록", _mu_dir)
+
+def _zone_list():
+    mu = globals().get("meshing_utilities")
+    for nm in ("get_face_zones", "get_face_zone_id_list",
+               "get_face_zone_name_list", "get_zones"):
+        fn = getattr(mu, nm, None)
+        if fn is None:
+            continue
+        try:
+            out = fn()
+            print("    %s() -> %s" % (nm, str(out)[:600]))
+        except Exception as e:
+            print("    %s() 실패: %s: %s" % (nm, type(e).__name__, str(e)[:120]))
+step("13. 면 존 질의", _zone_list)
+
+def _zone_centers():
+    """존별 대표 좌표를 얻을 수 있는지 — face_seeds 매칭의 전제."""
+    mu = globals().get("meshing_utilities")
+    for nm in ("get_average_bounding_box_center",
+               "get_bounding_box_of_zone_list",
+               "get_zone_centroid", "get_face_zone_area"):
+        fn = getattr(mu, nm, None)
+        print("    %s : %s" % (nm, "있음" if fn else "없음"))
+    print("    face_seeds 개수: " + str(len(FACE_SEEDS)))
+    for k in list(FACE_SEEDS)[:6]:
+        print("      %s -> %s" % (k, FACE_SEEDS[k]))
+step("14. 존 좌표 API 확인", _zone_centers)
 
 print("=" * 60)
 print("기대 셀 존 수: " + str(EXPECT_ZONES))

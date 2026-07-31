@@ -827,3 +827,14 @@ def test_run_md_warns_core_count_affects_cells():
     md = exporters.run_md(p, est=meshing.estimate(p), n_bodies=13)
     assert "코어 수가 셀 수에 영향" in md
     assert "229,026" in md
+
+
+def test_journal_embeds_face_seeds():
+    """M2 준비 — 좌표 라벨링 탐색 단계에 seed 가 실려야 함"""
+    from fthx import presets, exporters
+    seeds = {"air_inlet": [-40.0, 12.7, 50.0], "ref_inlet_c01": [11.0, 12.7, 0.0]}
+    j = exporters.fluent_journal(presets.probe(), face_seeds=seeds)
+    assert "FACE_SEEDS = {" in j
+    assert "air_inlet" in j and "ref_inlet_c01" in j
+    assert "meshing_utilities" in j
+    assert "12. meshing_utilities 목록" in j
