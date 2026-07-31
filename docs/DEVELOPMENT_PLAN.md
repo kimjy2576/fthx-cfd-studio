@@ -1,6 +1,6 @@
 # FT-HX CFD Studio — 개발 계획
 
-> 최종 갱신: v0.4.0 시점
+> 최종 갱신: v0.6.0 · M0 완료 · C 완료
 > 레포: `kimjy2576/fthx-cfd-studio` (private)
 
 ---
@@ -43,18 +43,22 @@ h_bend = min(h_ref, πR / N_arc)
 
 ---
 
-## 2. 현재 상태 (v0.4.0 — 완료)
+## 2. 현재 상태 (v0.6.0 — M0·C 완료)
 
 ### 구성
 
 ```
-fthx/params.py        형상 스키마 · Wang 정의 파생량 · HX-Sim ft_spec 상호변환
-fthx/circuits.py      회로 스키마 · 자동 생성기 4종 · 위상 검증 · 벤드 간섭/스탠드오프
-fthx/distributor.py   병렬 회로 분배 솔버 · porous jump 계수 산정 (CoolProp)
+fthx/params.py        형상 스키마(3층: 관배열 ⊃ 덕트 ⊃ 핀팩) · Wang 파생량(D_c 기준)
+                      · 운전 조건 · HX-Sim ft_spec 상호변환
+fthx/circuits.py      회로 스키마 · 생성기 4종 · 위상/간섭 검증 · 방향 반전
+fthx/distributor.py   분배 솔버 · porous jump · 발달 길이 · 간섭 검사
+fthx/meshing.py       사이징 유도 · y+ 판정 · 실측 보정 셀 추정 · 실현가능성
+fthx/presets.py       tutorial(관1개) / probe(관3개+벤드)
 fthx/cad.py           CadQuery/OCC → 바디 이름 승계 STEP + face_seeds
-server/app.py         FastAPI (정적 서빙 + REST)
-web/index.html        스튜디오 — 3D 미리보기 · 회로 맵 에디터 · STL · case.json
-tests/                회귀 테스트 22개
+server/app.py         FastAPI (정적 서빙 · REST · git 자동 업데이트)
+web/index.html        스튜디오 — 3D · 회로 에디터 · STL · case.json · 튜토리얼
+fluent/               M0 스모크 테스트 · Watertight 설정 · 실측 결과
+tests/                회귀 테스트 81개
 ```
 
 ### 검증된 수치
@@ -69,7 +73,7 @@ tests/                회귀 테스트 22개
 | 플레넘 → 피더 → 회로 연결성 | 솔리드 1개 |
 | 파라미터 스윕 36조합 | 100% 무인 성공, 1.07 s/케이스 |
 | 분배 균등화 (전면 5분할) | 14.40% → 0.0000%, 총유량 보존 |
-| 테스트 | 22 passed |
+| 테스트 | **81 passed** |
 
 ### 회로 패턴 검증
 
@@ -179,7 +183,7 @@ geom/mesh 를 건너뛰고 setup 부터 돎. 메시 30분 걸린 걸 BC 오타�
 
 | M | 내용 | 게이트 |
 |---|---|---|
-| **M0** | **스모크 테스트** (아래 3항) | 열수지 오차 < 1% |
+| ~~M0~~ | ~~스모크 테스트~~ | **✅ 완료 — 아래 참조** |
 | M1 | PyFluent 메시 생성기 + 품질 게이트 + 재시도 사다리 | 20조합 무인 성공 ≥ 90% |
 | M2 | LABEL — face_seeds ↔ 존 좌표 매칭, 미매칭 시 중단 | 미매칭 0 |
 | M3 | SETUP — 포러스·jump·BC·물성 자동, 열 모델 3종 | GUI 입력 0건 |
@@ -190,13 +194,40 @@ geom/mesh 를 건너뛰고 setup 부터 돎. 메시 30분 걸린 걸 BC 오타�
 | M8 | `reduced_resolved` / `periodic_cell` 도메인 모드 | B vs C 폐합 오차 확인 |
 | M9 | 2상 확장 (관내 1D 세그먼트 + 헤더 CFD 하이브리드) | — |
 
-### M0 — 스모크 테스트 (선행, 30분)
+### M0 — 완료 (Fluent 2025 R1, Rev 25.1.0)
 
-1. STEP 임포트 후 **존 이름 형식** (per-face granularity 에서 어떻게 붙는지)
-2. **Share Topology = All** 로 포러스 ↔ 관벽이 conformal 접합되는지
-3. **NETM 열수지가 닫히는지** (1열×4단 소형 케이스)
+상세: [`fluent/M0_RESULTS.md`](../fluent/M0_RESULTS.md)
 
-M0 결과에 따라 M3 설계가 달라짐. 건너뛰면 M1~M3 을 다 만들고 되돌아올 수 있음.
+| | tutorial (관1개) | probe (관3개+벤드2) |
+|---|---|---|
+| 바디 / 셀 존 | 5 / 5 | 13 / 13 |
+| 총 셀 | 68,641 | 164,461 |
+| 최소 직교품질 | 0.31 | 0.225 |
+
+**확정**
+- 존 이름: `{바디}-solid` / `{바디}-solid:1` / `{A}-solid-{B}-solid` / `interior--{바디}-solid`
+- Share Topology·imprint·벤드 메싱 전부 동작
+
+**발견 3건 (전부 설계에 반영됨)**
+1. **계면 존 이름을 신뢰할 수 없음** — 관벽↔코어/냉매는 별도 이름 없이 이웃 존에
+   흡수됨 → `face_seeds` 좌표 라벨링이 필수임이 실측 확인
+2. **Proximity cells-per-gap 이 셀 수를 지배** — 기본 3 이면 관벽(0.65mm)을
+   틈새로 보고 t/3 까지 자동 세분화. 1.31M → 68.6k (19배)
+3. **관벽이 품질 병목** (0.225) — poly 가 얇은 환형에 눌림 → Thin Volume Mesh
+
+**NETM 열수지 검증은 M3 로 이월** (SETUP 단계에서 확인)
+
+### C — 완료 (메시 전략 + 셀 추정)
+
+- **사이징 유도**: `h_air=(Pt−Do)/N_gap`, `h_ref=Di/N_d`,
+  `h_bend=min(h_ref, πR/N_arc)`, **`cells_per_gap`**
+- **경계층 불필요**: y+ = 190(4회로) / 131(6회로) 로 이미 벽함수 범위.
+  프리즘 5층은 냉매를 2.8M→7M+ 로 늘리기만 함. 저유량 시 완충층 진입을 감시
+- **관벽**: Bi≈6e-4 → 두께 방향 등온 → Thin Volume Mesh 1층
+- **실측 보정 추정기**: `cells = K·V/h³`. K 는 M0 두 케이스에서 역산.
+  관 관련 존 ±1%, core ±17%, 상·하류 ±40%.
+  실측 2건이 추정 범위 안에 들어옴(−7.5% / +8.7%)
+- **전체 케이스 13.9~17.1 M** — 상·하류 연장이 27~40% 를 차지
 
 ---
 
