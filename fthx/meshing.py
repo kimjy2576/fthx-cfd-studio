@@ -40,7 +40,24 @@ def sizing(p: FTHXParams, ms: Optional[MeshSpec] = None) -> dict:
     }
     h_min = min(per_body.values())
     h_max = max(per_body.values())
+
+    # Fluent 의 Min size 는 하한선이지 목표가 아님. 곡률·근접 조건이 요구할 때만
+    # 그 크기로 내려감. 관벽처럼 얇지만 곡률이 완만한 바디는 자동으로 안 잡히므로
+    # Local Sizing 을 직접 걸어야 함. (2025R1 실측: 관벽 0.65mm 에 셀 1겹만 들어감)
+    local = [
+        {"name": "tube-wall", "scope": "solid_tube_*", "type": "face-and-body",
+         "size_mm": round(h_wall, 3),
+         "why": f"관벽 {(t.Do-t.Di)/2:.2f}mm 를 {ms.N_wall}겹으로 — "
+                "conjugate 열전도 성립 조건"},
+        {"name": "tube-inner", "scope": "fluid_ref_*", "type": "face-and-body",
+         "size_mm": round(h_ref, 3), "why": "관내 유동"},
+    ]
+    if p.domain.include_bends:
+        local.append({"name": "bend", "scope": "*_bend_*", "type": "face-and-body",
+                      "size_mm": round(h_bend, 3), "why": "비정형 벤드 곡률"})
+
     return {
+        "local_sizing": local,
         "spec": ms.model_dump(),
         "h_air_mm": h_air, "h_wall_mm": h_wall,
         "h_ref_mm": h_ref, "h_bend_mm": h_bend,
