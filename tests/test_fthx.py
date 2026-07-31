@@ -4,6 +4,7 @@
     pytest -q                    (cadquery 없으면 형상 테스트는 자동 skip)
 """
 import math
+from pathlib import Path
 
 import pytest
 
@@ -731,3 +732,46 @@ def test_estimate_zone_breakdown_sums(p):
     assert sum(r["cells"] for r in e["zones"]) == pytest.approx(e["total"])
     assert sum(r["frac"] for r in e["zones"]) == pytest.approx(1.0)
     assert e["zones"][0]["cells"] >= e["zones"][-1]["cells"]    # 내림차순
+
+
+# ─────────────────── M1: 메시 생성기 (Fluent 없이 되는 부분) ───────────────────
+def test_step_body_count_matches_cad():
+    from fluent.mesh import step_bodies
+    from fthx import presets
+    import tempfile
+    p = presets.probe()
+    if not HAS_CAD:
+        pytest.skip("cadquery 필요")
+    with tempfile.TemporaryDirectory() as d:
+        m = CAD.export(p, outdir=d, cs=CQC.gen_single(p))
+        assert len(step_bodies(Path(m["_files"]["step"]))) == 13
+
+
+@pytest.mark.parametrize("st,expect_issue", [
+    ({"cell_zones": 13, "expected_zones": 13, "cells": 164461, "min_quality": 0.225}, None),
+    ({"cell_zones": 11, "expected_zones": 13, "cells": 164461, "min_quality": 0.225}, "셀 존"),
+    ({"cell_zones": 13, "expected_zones": 13, "cells": 164461, "min_quality": 0.05}, "직교품질"),
+    ({"cell_zones": 13, "expected_zones": 13, "cells": 25_000_000, "min_quality": 0.3}, "예산"),
+])
+def test_quality_gate(st, expect_issue):
+    from fluent.mesh import MeshRun, gate
+    from fthx import presets
+    run = MeshRun(step=Path("x.step"), params=presets.probe(), budget=20e6)
+    issues = gate(run, st)
+    if expect_issue is None:
+        assert issues == []
+    else:
+        assert any(expect_issue in i for i in issues)
+
+
+def test_retry_ladder_monotonically_refines():
+    """사다리를 올라갈수록 셀이 늘어야 함 (더 촘촘해지므로)"""
+    from fluent.mesh import LADDER
+    from fthx import presets, meshing
+    p = presets.probe()
+    prev = 0.0
+    for label, over in LADDER:
+        ms = meshing.MeshSpec(**over)
+        n = meshing.estimate(p, None, ms)["total"]
+        assert n >= prev, f"{label} 에서 셀이 줄어듦"
+        prev = n
