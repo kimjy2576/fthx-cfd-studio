@@ -156,6 +156,10 @@ def zone_volumes(p: FTHXParams, cs=None) -> dict:
         wt = p.duct.wall_t
         Lx = p.domain.L_up + W + p.domain.L_down
         V["casing"] = ((Hd + 2 * wt) * (Ld + 2 * wt) - Hd * Ld) * Lx
+    if p.duct.wall_t > 0:
+        w = p.duct.wall_t
+        Lx = (p.domain.L_up + (b["x1"] - b["x0"]) + p.domain.L_down)
+        V["casing"] = ((Hd + 2 * w) * (Ld + 2 * w) - Hd * Ld) * Lx
     if cs is not None:
         from . import circuits as CQC
         bends = CQC.derive_bends(p, cs)
@@ -172,6 +176,7 @@ def estimate(p: FTHXParams, cs=None, ms: Optional[MeshSpec] = None) -> dict:
     s = sizing(p, ms)
     V = zone_volumes(p, cs)
     h = {"core": s["h_air_mm"], "bypass": s["h_air_mm"],
+         "casing": s["h_ref_mm"],
          "ref": s["h_ref_mm"], "wall": s["h_ref_mm"],
          "bend_f": s["h_bend_mm"], "bend_s": s["h_bend_mm"],
          "up": s["workflow_max_mm"], "down": s["workflow_max_mm"],

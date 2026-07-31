@@ -330,8 +330,7 @@ def _rename():
             ("rename_face_zone(zone_id=id, new_name=key)",
              lambda r=r, key=key: MU.rename_face_zone(
                  zone_id=r["id"], new_name=key)),
-            ("tui.boundary.manage.name(old, key)",
-             lambda r=r, key=key: TUI().boundary.manage.name(r["name"], key)),
+            # TUI 폴백은 두지 않음 — 인자를 되물으면 배치에서 멈춤
         ])
 step("14. 존 이름 부여", _rename)
 
