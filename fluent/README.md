@@ -52,6 +52,8 @@ CAD.export(p, cs=CQC.gen_face_split(p, 4))
 
 ## 방법 A — GUI (가장 확실, 5분)
 
+설정 순서 전체는 [`WATERTIGHT.md`](WATERTIGHT.md) 참고.
+
 Linux 서버에 X11 포워딩이나 VNC 가 되면 이게 제일 빠름. 버전 차이에 안 걸림.
 
 ```bash
