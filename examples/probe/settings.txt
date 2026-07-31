@@ -1,0 +1,42 @@
+Watertight Geometry 워크플로우 — 넣을 값
+=========================================
+
+1. Import Geometry
+     File Name        model.step
+     Length Unit      mm
+     → Import
+     확인: 오브젝트 16개
+
+2. Add Local Sizing
+     아무것도 추가하지 않음 → Update
+     (관벽에 걸면 안 됨 — 표면이 코어·냉매와 공유되어 이웃까지 조밀해짐)
+
+3. Generate the Surface Mesh          ← 가장 중요
+     Minimum Size     0.685
+     Maximum Size     3.176
+     Growth Rate      1.2
+     Cells Per Gap    1
+     → Generate
+     ※ 숫자 입력 후 Enter 를 눌러야 확정됨
+
+4. Describe Geometry
+     Geometry Type    both fluid and solid regions and/or voids
+     Share Topology   Yes
+     → Describe
+
+5. Update Boundaries → Create Regions → Update Regions
+     기본값 → 각각 Update
+
+6. Add Boundary Layers
+     건너뜀 (smooth-transition_* 가 생기면 우클릭 → Delete)
+
+7. Generate the Volume Mesh
+     Fill With        polyhedra
+     → Generate
+
+확인 명령
+---------
+     /objects/list
+     /boundary/manage/list
+     /mesh/check-mesh
+   (/mesh/size-info 는 2025 R1 에 없음)

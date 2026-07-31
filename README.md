@@ -29,6 +29,53 @@
 
 ---
 
+## Fluent 서버에서 바로 실행 (Linux · 파이썬 불필요)
+
+예제 케이스가 STEP + 저널까지 만들어진 채로 들어 있음.
+**Fluent 외에는 아무것도 설치할 필요가 없음.**
+
+### 최초 1회
+
+```bash
+cd ~
+git clone https://github.com/kimjy2576/fthx-cfd-studio.git
+cd fthx-cfd-studio/examples/probe
+fluent 3d -meshing -g -t8 -i mesh.py
+```
+
+### 이후 (갱신 + 실행)
+
+```bash
+cd ~/fthx-cfd-studio && git pull
+cd examples/probe && fluent 3d -meshing -g -t8 -i mesh.py
+```
+
+### 결과 확인
+
+```bash
+bjobs                 # 비면 완료
+cd ~/fthx-cfd-studio/examples/probe && ../check.sh
+```
+
+`check.sh` 가 단계별 성공/실패, 셀 수·품질, 좌표 매칭 거리, 오류, 생성 파일을
+한 번에 보여줌.
+
+### 예제
+
+| 케이스 | 바디 | 용도 |
+|---|---|---|
+| `examples/tutorial` | 8 | 관 1개 · 벤드 없음 — 첫 시험 |
+| `examples/probe` | 16 | 관 3개 + 벤드 2개 + 케이싱 — imprint·벤드 확인 |
+
+```bash
+./examples/run.sh probe 8        # 케이스명, 코어수
+```
+
+> ⚠ **코어 수가 셀 수에 영향을 줌** (병렬 분할 경계에서 메시가 달라짐).
+> 케이스 간 비교 시 `-t` 를 고정할 것. 작은 케이스는 8코어가 대기도 짧고 빠름.
+
+---
+
 ## 빠른 시작
 
 ### Windows — 가장 쉬운 방법

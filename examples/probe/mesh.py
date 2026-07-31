@@ -1,0 +1,310 @@
+# -*- coding: utf-8 -*-
+# FT-HX CFD Studio — Fluent Meshing 저널 (내장 파이썬)
+#
+#   fluent 3d -meshing -g -t8 -i mesh.py
+#
+# 값은 형상에서 유도됨 (fthx.meshing.sizing). 손으로 고칠 것 없음.
+#   h_air  = (Pt - Do)/N_gap = 1.588 mm
+#   h_ref  = Di/N_d          = 0.685 mm
+#   h_bend = min(h_ref, pi R/N_arc) = 0.685 mm
+#
+# Cells Per Gap = 1 가 핵심임. 기본 3 이면 관벽(0.65mm)을
+# 틈새로 보고 t/3 까지 자동 세분화해 셀이 20배로 늘어남 (2025R1 실측).
+#
+# ⚠ 코어 수가 셀 수에 영향을 줌. 병렬 분할 경계에서 메시가 달라지기 때문임.
+#   probe 실측: 4코어 164,461 → 32코어 229,026 (+39%).
+#   케이스 간 비교를 할 때는 -t 값을 고정할 것.
+
+import traceback
+
+STEP        = r"model.step"
+MESH_OUT    = r"mesh.msh.h5"
+MIN_SIZE    = 0.685
+MAX_SIZE    = 3.176
+GROWTH      = 1.2
+CELLS_PER_GAP = 1
+EXPECT_ZONES  = 16
+
+def step(label, fn):
+    """각 단계를 감싸 로그에 남김. 실패해도 다음으로 진행해 진단을 모음."""
+    print("=" * 60)
+    print(">>> " + label)
+    try:
+        fn()
+        print("<<< OK   " + label)
+        return True
+    except Exception as e:
+        print("<<< FAIL " + label + " : " + type(e).__name__ + ": " + str(e)[:300])
+        traceback.print_exc()
+        return False
+
+def task(*names):
+    for n in names:
+        try:
+            return workflow.TaskObject[n]
+        except Exception:
+            continue
+    raise KeyError("태스크 없음: " + str(names))
+
+def set_args(t, d):
+    try:
+        t.Arguments.set_state(d)
+    except Exception:
+        t.Arguments = d
+
+def TUI():
+    """Fluent 내장 파이썬에서 TUI 진입점 이름이 전역이 아닐 수 있음.
+       2025R1 실측: 'tui' 는 NameError. 후보를 순서대로 찾음."""
+    g = globals()
+    for nm in ("tui", "meshing", "solver", "session", "root"):
+        o = g.get(nm)
+        if o is None:
+            continue
+        if nm == "tui":
+            return o
+        t = getattr(o, "tui", None)
+        if t is not None:
+            return t
+    for nm in ("PyMenu", "main_menu"):
+        if nm in g:
+            return g[nm]
+    raise NameError("TUI 진입점을 찾지 못함. globals: "
+                    + ", ".join(sorted(k for k in g if not k.startswith("_")))[:400])
+
+# ── 워크플로우 ─────────────────────────────────────────────
+step("InitializeWorkflow",
+     lambda: workflow.InitializeWorkflow(WorkflowType="Watertight Geometry"))
+
+def _import():
+    t = task("Import Geometry")
+    set_args(t, {"FileName": STEP, "LengthUnit": "mm", "AppendMesh": False})
+    t.Execute()
+step("1. Import Geometry", _import)
+
+step("2. Add Local Sizing (건너뜀)",
+     lambda: task("Add Local Sizing").Execute())
+
+def _surface():
+    t = task("Generate the Surface Mesh")
+    ctrl = {"MinSize": MIN_SIZE, "MaxSize": MAX_SIZE,
+            "GrowthRate": GROWTH, "CellsPerGap": CELLS_PER_GAP,
+            "SizeFunctions": "Curvature & Proximity",
+            "ScopeProximityTo": "faces"}
+    try:
+        set_args(t, {"CFDSurfaceMeshControls": ctrl})
+    except Exception:
+        set_args(t, ctrl)
+    t.Execute()
+step("3. Generate the Surface Mesh", _surface)
+
+def _describe():
+    t = task("Describe Geometry", "Geometry Setup")
+    try:
+        set_args(t, {
+            "SetupType": "The geometry consists of both fluid and solid regions and/or voids",
+            "CappingRequired": "No", "WallToInternal": "No",
+            "InvokeShareTopology": "Yes", "NonConformal": "No"})
+    except Exception:
+        set_args(t, {"InvokeShareTopology": "Yes"})
+    t.Execute()
+step("4. Describe Geometry (Share Topology)", _describe)
+
+for _n in ("Apply Share Topology", "Update Boundaries",
+           "Create Regions", "Update Regions"):
+    step("5. " + _n, (lambda n: (lambda: task(n).Execute()))(_n))
+
+def _no_bl():
+    for c in ("Add Boundary Layers", "smooth-transition_1"):
+        try:
+            t = task(c)
+            for m in ("Delete", "DeleteChildren"):
+                if hasattr(t, m):
+                    getattr(t, m)()
+                    break
+        except Exception:
+            pass
+step("6. Add Boundary Layers 비활성 (y+ 가 이미 벽함수 범위)", _no_bl)
+
+def _volume():
+    t = task("Generate the Volume Mesh")
+    try:
+        set_args(t, {"VolumeFill": "polyhedra",
+                     "VolumeMeshPreferences": {"ShowVolumeMeshPreferences": False}})
+    except Exception:
+        set_args(t, {"VolumeFill": "polyhedra"})
+    t.Execute()
+step("7. Generate the Volume Mesh", _volume)
+
+# ── 결과 ───────────────────────────────────────────────────
+# 8~10 단계: TUI 진입점을 찾아 결과 확인 + 메시 저장
+def _check():   TUI().mesh.check_mesh()
+def _zones():   TUI().boundary.manage.list()
+def _write():   TUI().file.write_mesh(MESH_OUT)
+
+# 저장은 반드시 되어야 하므로 대안 경로도 시도
+def _write_any():
+    errs = []
+    for label, fn in (
+            ("TUI().file.write_mesh", _write),
+            ("meshing.tui.file.write_mesh",
+             lambda: globals()["meshing"].tui.file.write_mesh(MESH_OUT)),
+            ("session.tui.file.write_mesh",
+             lambda: globals()["session"].tui.file.write_mesh(MESH_OUT)),
+            ("workflow parent", lambda: workflow._parent.tui.file.write_mesh(MESH_OUT)),
+    ):
+        try:
+            fn()
+            print("    저장 경로: " + label)
+            return
+        except Exception as e:
+            errs.append(label + " -> " + type(e).__name__ + ": " + str(e)[:120])
+    print("    !! 메시 저장 실패 — 시도한 경로:")
+    for e in errs:
+        print("       " + e)
+    raise RuntimeError("메시 저장 실패")
+
+step("8. check-mesh", _check)
+step("9. boundary list", _zones)
+step("10. write mesh", _write_any)
+
+# 전역 이름 덤프 — 위가 실패하면 이 목록으로 경로를 확정할 수 있음
+def _dump():
+    ns = sorted(k for k in globals() if not k.startswith("_"))
+    print("    globals: " + ", ".join(ns))
+step("11. 전역 이름 덤프", _dump)
+
+# ── M2 준비: 경계 라벨링 API 탐색 ─────────────────────────
+# 목표는 face_seeds 좌표로 면 존을 찾아 이름·타입을 붙이는 것.
+# 지금은 바디 단위로 묶여 있을 수 있어(예: fluid_air_up-solid:1 안에
+# 입구면과 측벽이 함께) 면 단위 분리가 필요한지 여기서 판정함.
+FACE_SEEDS = {"air_inlet": [-40.0, 38.1, 50.0], "air_outlet": [102.0, 38.1, 50.0], "duct_y_min": [11.0, 0.0, 50.0], "duct_y_max": [11.0, 76.2, 50.0], "duct_z_min": [11.0, 38.1, 10.0], "duct_z_max": [11.0, 38.1, 90.0], "ref_inlet_c01": [11.0, 12.7, 0.0], "ref_outlet_c01": [11.0, 63.5, 100.0]}
+
+# ══════════════════════════════════════════════════════════════
+#  M2 — 좌표 기반 경계 라벨링
+#
+#  M0 에서 계면 존 이름을 신뢰할 수 없음이 확인됐으므로(관벽↔코어가 별도
+#  이름 없이 이웃 존에 흡수됨), face_seeds 좌표로 면을 찾아 이름을 붙임.
+#
+#  확정된 시그니처 (2025R1 실측):
+#    mu.get_face_zones(filter="*")                      -> [id, ...]
+#    mu.get_cell_zones(filter="*")                      -> [id, ...]
+#    mu.get_average_bounding_box_center(face_zone_id_list=[id]) -> [x,y,z]
+#    mu.get_face_zone_area(face_zone_id_list=[id])      -> float
+#
+#  걸림돌: Import Geometry 에 면 단위 존 옵션이 없어 존이 바디 단위로 묶임.
+#         → 각도로 분리한 뒤 좌표 매칭.
+# ══════════════════════════════════════════════════════════════
+MU = globals().get("meshing_utilities")
+
+def _try_all(label, trials):
+    print("  == " + label)
+    for name, fn in trials:
+        try:
+            out = fn()
+            if out is False:          # run_menu 는 실패 시 False 를 반환함
+                print("    [--] " + name + " -> False (명령 실패)")
+                continue
+            print("    [OK] " + name + " -> " + str(out)[:300])
+            return name, out
+        except Exception as e:
+            print("    [--] " + name + " : " + type(e).__name__ + ": " + str(e)[:90])
+    return None, None
+
+def zone_names(ids):
+    nm, out = _try_all("존 id -> 이름", [
+        ("convert_zone_ids_to_name_strings(zone_id_list=ids)",
+         lambda: MU.convert_zone_ids_to_name_strings(zone_id_list=ids)),
+        ("convert_zone_ids_to_name_strings(zone_ids=ids)",
+         lambda: MU.convert_zone_ids_to_name_strings(zone_ids=ids)),
+    ])
+    return out or []
+
+def zone_table():
+    """면 존별 id · 이름 · 대표좌표 · 면적. 라벨링의 기초 자료."""
+    ids = MU.get_face_zones(filter="*")
+    names = zone_names(ids)
+    rows = []
+    for i, zid in enumerate(ids):
+        try:
+            c = MU.get_average_bounding_box_center(face_zone_id_list=[zid])
+        except Exception:
+            c = None
+        try:
+            a = MU.get_face_zone_area(face_zone_id_list=[zid])
+        except Exception:
+            a = None
+        rows.append({"id": zid,
+                     "name": names[i] if i < len(names) else "?",
+                     "c": c, "area": a})
+    return rows
+
+def _dump_zones():
+    rows = zone_table()
+    globals()["_ROWS"] = rows
+    print("    면 존 %d개" % len(rows))
+    print("    %-8s %-46s %-34s %s" % ("id", "name", "center", "area"))
+    for r in rows:
+        c = r["c"]
+        cs = ("[%9.2f %9.2f %9.2f]" % tuple(c)) if c else "?"
+        print("    %-8s %-46s %-34s %s" %
+              (r["id"], str(r["name"])[:46], cs,
+               ("%.1f" % r["area"]) if r["area"] else "?"))
+step("12. 면 존 표 (id/이름/좌표/면적)", _dump_zones)
+
+# 각도 분리 단계는 제거함.
+# 케이싱 솔리드가 있으면 상·하류 박스의 자유면이 입구/출구만 남아
+# 분리가 필요 없음. 남겨두면 32노드 병렬에서 SIGSEGV 를 유발했음(실측).
+
+def _match():
+    """존 좌표를 face_seeds 와 최근접 매칭."""
+    rows = zone_table()
+    globals()["_ROWS2"] = rows
+    print("    면 존 %d개" % len(rows))
+    cand = [r for r in rows if r["c"]]
+    hits = {}
+    for key, seed in FACE_SEEDS.items():
+        best, bd = None, 1e18
+        for r in cand:
+            c = r["c"]
+            d = ((c[0]-seed[0])**2 + (c[1]-seed[1])**2 + (c[2]-seed[2])**2) ** 0.5
+            if d < bd:
+                best, bd = r, d
+        hits[key] = (best, bd)
+        print("    %-18s -> id %-8s %-40s  거리 %.3f mm" %
+              (key, best["id"] if best else "?",
+               str(best["name"])[:40] if best else "?", bd))
+    bad = [k for k, (r, d) in hits.items() if d > 1.0]
+    print("    임계값 1mm 초과: %s" % (bad if bad else "없음"))
+    globals()["_HITS"] = hits
+step("13. face_seeds 좌표 매칭", _match)
+
+def _rename():
+    hits = globals().get("_HITS") or {}
+    for key, (r, d) in hits.items():
+        if r is None or d > 1.0:
+            print("    건너뜀 %s (거리 %.2f)" % (key, d))
+            continue
+        _try_all("rename %s" % key, [
+            ("rename_face_zone(zone_name=old, new_name=key)",
+             lambda r=r, key=key: MU.rename_face_zone(
+                 zone_name=r["name"], new_name=key)),
+            ("rename_face_zone(zone_id=id, new_name=key)",
+             lambda r=r, key=key: MU.rename_face_zone(
+                 zone_id=r["id"], new_name=key)),
+            # TUI 폴백은 두지 않음 — 인자를 되물으면 배치에서 멈춤
+        ])
+step("14. 존 이름 부여", _rename)
+
+def _seeds():
+    print("    face_seeds %d개" % len(FACE_SEEDS))
+    for k in sorted(FACE_SEEDS):
+        print("      %-16s %s" % (k, FACE_SEEDS[k]))
+step("15. face_seeds 목록", _seeds)
+
+step("16. 라벨된 메시 저장",
+     lambda: TUI().file.write_mesh(MESH_OUT.replace(".msh", "_labeled.msh")))
+
+print("=" * 60)
+print("기대 셀 존 수: " + str(EXPECT_ZONES))
+print("위 check-mesh 출력의 Total Number of Cell Zones 와 비교할 것")
+print("=" * 60)

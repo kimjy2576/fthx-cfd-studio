@@ -1,0 +1,382 @@
+{
+  "schema_version": "fthx/1",
+  "name": "probe_small",
+  "units": "mm",
+  "operating": {
+    "air": {
+      "V_face": 2.0,
+      "T_in": 27.0,
+      "RH_in": 50.0,
+      "P_in": 101325.0
+    },
+    "ref": {
+      "fluid": "R410A",
+      "mode": "evaporator",
+      "m_total": 0.03,
+      "T_sat_in": 7.0,
+      "quality_in": null,
+      "superheat_out": 5.0,
+      "subcool_out": null
+    },
+    "thermal": {
+      "model": "equilibrium",
+      "contact_R": 0.0
+    }
+  },
+  "operating_derived": {
+    "air": {
+      "rho": 1.1686226699193116,
+      "mu": 1.844231745733014e-05,
+      "cp": 1016.1050495480933,
+      "W": 0.011195553880206086,
+      "source": "CoolProp/HAPropsSI",
+      "A_front_m2": 0.006096,
+      "m_dot_kgs": 0.014247847591656248,
+      "u_max_ms": 3.4651789589285915,
+      "G_max": 4.049486686731351,
+      "Re_Dc": 2140.864090805347,
+      "Re_Dh": 504.7225160118518
+    },
+    "ref": {
+      "fluid": "R410A",
+      "mode": "evaporator",
+      "m_total_kgs": 0.03,
+      "T_sat_in_C": 7.0
+    },
+    "thermal": "equilibrium"
+  },
+  "params": {
+    "schema_version": "fthx/1",
+    "name": "probe_small",
+    "tube": {
+      "Do": 9.52,
+      "Di": 8.22,
+      "L": 100.0,
+      "Nr": 1,
+      "Nt": 3,
+      "Pt": 25.4,
+      "Pl": 22.0,
+      "layout": "inline",
+      "k_tube": 386.0
+    },
+    "fin": {
+      "FPI": 14.0,
+      "t_f": 0.115,
+      "fin_type": "plain",
+      "k_fin": 205.0,
+      "L_fin": 80.0,
+      "z_center": null,
+      "edge_y": null
+    },
+    "domain": {
+      "L_up": 40.0,
+      "L_down": 80.0,
+      "split_core_by_row": true,
+      "include_tube_fluid": true,
+      "include_bends": true,
+      "port_stub": 0.0,
+      "port_stub_auto": false,
+      "port_stub_criterion": "practical",
+      "symmetry": "none",
+      "bend_gap": 8.0
+    },
+    "duct": {
+      "gap_y": 0.0,
+      "gap_z": 0.0,
+      "wall_t": 2.0
+    },
+    "export": {
+      "unit": "MM",
+      "precision_mode": 0,
+      "write_pcurves": false
+    },
+    "operating": {
+      "air": {
+        "V_face": 2.0,
+        "T_in": 27.0,
+        "RH_in": 50.0,
+        "P_in": 101325.0
+      },
+      "ref": {
+        "fluid": "R410A",
+        "mode": "evaporator",
+        "m_total": 0.03,
+        "T_sat_in": 7.0,
+        "quality_in": null,
+        "superheat_out": 5.0,
+        "subcool_out": null
+      },
+      "thermal": {
+        "model": "equilibrium",
+        "contact_R": 0.0
+      }
+    },
+    "bend": {
+      "R_over_D": null,
+      "leg": 0.0
+    }
+  },
+  "derived": {
+    "Fp_mm": 1.8142857142857143,
+    "N_fin": 44,
+    "L_fin_mm": 80.0,
+    "L_tube_mm": 100.0,
+    "edge_y_mm": 12.7,
+    "bare_tube_mm": 20.0,
+    "D_c_mm": 9.75,
+    "A_front_mm2": 6096.0,
+    "A_min_mm2": 3518.433,
+    "sigma": 0.5771707677165354,
+    "A_o_mm2": 134698.8103810015,
+    "A_o_fin_frac": 0.9488759004684065,
+    "D_h_mm": 2.29862537853319,
+    "V_zone_mm3": 117028.57207008573,
+    "porosity_gamma": 0.930062828373622,
+    "V_fin_plate_mm3": 7349.216162057017,
+    "V_collar_mm3": 835.4311679985203,
+    "a_v_1perm": 1150.9908050517224,
+    "A_o_over_A_c": 38.28375028912061,
+    "duct_H_mm": 76.2,
+    "duct_L_mm": 80.0,
+    "A_duct_mm2": 6096.0,
+    "A_bypass_mm2": 0.0,
+    "bypass_area_frac": 0.0,
+    "sealed": true,
+    "bypass_depth_mm": 22.0,
+    "depth_mm": 22.0,
+    "height_mm": 76.2,
+    "tube_len_mm": 80.0,
+    "n_tube": 3
+  },
+  "ft_spec_SI": {
+    "Nr": 1,
+    "Nt": 3,
+    "N_seg": 5,
+    "Di": 0.00822,
+    "Do": 0.009519999999999999,
+    "Pt": 0.0254,
+    "Pl": 0.022,
+    "FPI": 14.0,
+    "fin_type": "plain"
+  },
+  "core_bbox": {
+    "x": [
+      0.0,
+      22.0
+    ],
+    "y": [
+      0.0,
+      76.2
+    ],
+    "z": [
+      10.0,
+      90.0
+    ]
+  },
+  "fin_pack": {
+    "x0": 0.0,
+    "x1": 22.0,
+    "y0": 0.0,
+    "y1": 76.2,
+    "z0": 10.0,
+    "z1": 90.0,
+    "L_fin": 80.0,
+    "edge_y": 12.7,
+    "z_center": 50.0
+  },
+  "symmetry": null,
+  "duct_box": {
+    "x0": 0.0,
+    "x1": 22.0,
+    "y0": 0.0,
+    "y1": 76.2,
+    "z0": 10.0,
+    "z1": 90.0,
+    "sealed": true
+  },
+  "tube_z": [
+    0.0,
+    100.0
+  ],
+  "port_stub": {
+    "len_mm": 0.0,
+    "per_circuit_kgs": 0.03,
+    "D_mm": 8.22,
+    "v_ms": 14.80566899215185,
+    "Re": 372960.5553888117,
+    "Le_over_D": 37.33044442495949,
+    "Le_mm": 306.85625317316703,
+    "regime": "turbulent",
+    "Le_practical_mm": 82.2
+  },
+  "face_seeds": {
+    "air_inlet": [
+      -40.0,
+      38.1,
+      50.0
+    ],
+    "air_outlet": [
+      102.0,
+      38.1,
+      50.0
+    ],
+    "duct_y_min": [
+      11.0,
+      0.0,
+      50.0
+    ],
+    "duct_y_max": [
+      11.0,
+      76.2,
+      50.0
+    ],
+    "duct_z_min": [
+      11.0,
+      38.1,
+      10.0
+    ],
+    "duct_z_max": [
+      11.0,
+      38.1,
+      90.0
+    ],
+    "ref_inlet_c01": [
+      11.0,
+      12.7,
+      0.0
+    ],
+    "ref_outlet_c01": [
+      11.0,
+      63.5,
+      100.0
+    ]
+  },
+  "zone_prefix": {
+    "fluid_air_": "fluid",
+    "fluid_ref_": "fluid",
+    "solid_": "solid",
+    "fluid_air_core": "porous"
+  },
+  "plenum": null,
+  "circuits": {
+    "pattern": "single",
+    "list": [
+      {
+        "id": "c01",
+        "tubes": [
+          0,
+          1,
+          2
+        ],
+        "inlet_end": "z0",
+        "m_frac": null
+      }
+    ],
+    "bends": [
+      {
+        "circuit": "c01",
+        "k": 1,
+        "a": 0,
+        "b": 1,
+        "end": "z1",
+        "R": 12.699999999999998,
+        "span": 25.399999999999995,
+        "center_xy": [
+          11.0,
+          25.4
+        ],
+        "leg": 0.0,
+        "straight": 0.0,
+        "standoff": 0.0,
+        "level": 0
+      },
+      {
+        "circuit": "c01",
+        "k": 2,
+        "a": 1,
+        "b": 2,
+        "end": "z0",
+        "R": 12.700000000000003,
+        "span": 25.400000000000006,
+        "center_xy": [
+          11.0,
+          50.8
+        ],
+        "leg": 0.0,
+        "straight": 0.0,
+        "standoff": 0.0,
+        "level": 0
+      }
+    ],
+    "ports": [
+      {
+        "name": "ref_inlet_c01",
+        "circuit": "c01",
+        "kind": "inlet",
+        "tube": 0,
+        "rc": [
+          0,
+          0
+        ],
+        "end": "z0",
+        "seed": [
+          11.0,
+          12.7,
+          0.0
+        ]
+      },
+      {
+        "name": "ref_outlet_c01",
+        "circuit": "c01",
+        "kind": "outlet",
+        "tube": 2,
+        "rc": [
+          0,
+          2
+        ],
+        "end": "z1",
+        "seed": [
+          11.0,
+          63.5,
+          100.0
+        ]
+      }
+    ],
+    "validation": {
+      "ok": true,
+      "warnings": [],
+      "standoff": {
+        "step_mm": 15.23,
+        "clearance_mm": 1.0,
+        "max_standoff_mm": 76.2,
+        "levels_used": [
+          0
+        ],
+        "max_level": 0,
+        "n_resolved_by_standoff": 0,
+        "n_structural_crossing": 0,
+        "crossings": [],
+        "max_protrusion_mm": 12.7
+      },
+      "summary": {
+        "pattern": "single",
+        "n_circuit": 1,
+        "circuits": [
+          {
+            "id": "c01",
+            "n_tube": 3,
+            "n_bend": 2,
+            "path_mm": 379.79645340118077,
+            "V_mm3": 20155.075129503744,
+            "rows_touched": [
+              0
+            ]
+          }
+        ],
+        "path_mean_mm": 379.79645340118077,
+        "path_spread_pct": 0.0,
+        "V_total_cm3": 20.155075129503743
+      }
+    }
+  }
+}

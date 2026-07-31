@@ -8,6 +8,7 @@ env/
 .DS_Store
 out/
 *.step
+!examples/*/model.step
 *.stl
 # 예제 STEP 은 용량 문제로 미포함 (scripts/gen_case.py 로 재생성)
 .pytest_cache/
