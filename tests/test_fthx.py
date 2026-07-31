@@ -837,4 +837,17 @@ def test_journal_embeds_face_seeds():
     assert "FACE_SEEDS = {" in j
     assert "air_inlet" in j and "ref_inlet_c01" in j
     assert "meshing_utilities" in j
-    assert "12. 임포트 옵션" in j
+    assert "12. 면 존 표" in j
+
+
+def test_journal_m2_labeling_section():
+    """M2 — 확정된 시그니처가 저널에 들어가야 함 (2025R1 실측)"""
+    from fthx import presets, exporters
+    j = exporters.fluent_journal(presets.probe(),
+                                 face_seeds={"air_inlet": [-40.0, 38.1, 50.0]})
+    assert 'MU.get_face_zones(filter="*")' in j
+    assert "get_average_bounding_box_center(face_zone_id_list=[zid])" in j
+    assert "get_face_zone_area(face_zone_id_list=[zid])" in j
+    assert "sep_face_zone_by_angle" in j          # 바디 단위 존을 면 단위로
+    assert "14. face_seeds 좌표 매칭" in j
+    assert "_labeled.msh" in j                     # 라벨된 메시 별도 저장

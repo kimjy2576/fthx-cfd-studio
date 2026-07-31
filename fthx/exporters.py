@@ -218,83 +218,150 @@ step("11. 전역 이름 덤프", _dump)
 # 입구면과 측벽이 함께) 면 단위 분리가 필요한지 여기서 판정함.
 FACE_SEEDS = {seeds}
 
+# ══════════════════════════════════════════════════════════════
+#  M2 — 좌표 기반 경계 라벨링
+#
+#  M0 에서 계면 존 이름을 신뢰할 수 없음이 확인됐으므로(관벽↔코어가 별도
+#  이름 없이 이웃 존에 흡수됨), face_seeds 좌표로 면을 찾아 이름을 붙임.
+#
+#  확정된 시그니처 (2025R1 실측):
+#    mu.get_face_zones(filter="*")                      -> [id, ...]
+#    mu.get_cell_zones(filter="*")                      -> [id, ...]
+#    mu.get_average_bounding_box_center(face_zone_id_list=[id]) -> [x,y,z]
+#    mu.get_face_zone_area(face_zone_id_list=[id])      -> float
+#
+#  걸림돌: Import Geometry 에 면 단위 존 옵션이 없어 존이 바디 단위로 묶임.
+#         → 각도로 분리한 뒤 좌표 매칭.
+# ══════════════════════════════════════════════════════════════
+MU = globals().get("meshing_utilities")
+
 def _try_all(label, trials):
-    """여러 시그니처를 시도하고 성공한 것을 보고. M2 인자 형식 확정용."""
     print("  == " + label)
-    ok = None
     for name, fn in trials:
         try:
             out = fn()
-            print("    [OK] " + name)
-            print("         -> " + str(out)[:500])
-            if ok is None:
-                ok = (name, out)
+            print("    [OK] " + name + " -> " + str(out)[:300])
+            return name, out
         except Exception as e:
             print("    [--] " + name + " : " + type(e).__name__ + ": " + str(e)[:90])
-    return ok
+    return None, None
 
-def _import_args():
-    """임포트 옵션 전체 — 면 단위 존 생성 옵션이 있는지 확인."""
-    t = task("Import Geometry")
-    for g in ("get_state", "getState"):
-        fn = getattr(t.Arguments, g, None)
-        if fn:
-            st = fn()
-            print("    Import Geometry Arguments:")
-            for k in sorted(st) if isinstance(st, dict) else []:
-                print("      %s = %s" % (k, str(st[k])[:120]))
-            return
-    print("    Arguments 상태를 읽지 못함: " + str(t.Arguments)[:300])
-step("12. 임포트 옵션 (면 단위 존 가능 여부)", _import_args)
-
-def _zone_query():
-    mu = globals()["meshing_utilities"]
-    got = _try_all("면 존 목록", [
-        ("get_face_zones(filter='*')", lambda: mu.get_face_zones(filter="*")),
-        ("get_face_zones('*')", lambda: mu.get_face_zones("*")),
-        ("get_face_zones(zone_name_pattern='*')",
-         lambda: mu.get_face_zones(zone_name_pattern="*")),
-        ("get_face_zones(only_boundary=True)",
-         lambda: mu.get_face_zones(only_boundary=True)),
-        ("get_face_zones(maximum_entity_count=1e12)",
-         lambda: mu.get_face_zones(maximum_entity_count=1e12)),
-        ("get_face_zone_count()", lambda: mu.get_face_zone_count()),
-        ("get_zones(type_name='face')", lambda: mu.get_zones(type_name="face")),
-        ("get_zones(filter='*')", lambda: mu.get_zones(filter="*")),
-        ("get_face_zone_id_list_with_labels(label_name_list=['*'])",
-         lambda: mu.get_face_zone_id_list_with_labels(label_name_list=["*"])),
-        ("get_cell_zones(filter='*')", lambda: mu.get_cell_zones(filter="*")),
+def zone_names(ids):
+    nm, out = _try_all("존 id -> 이름", [
+        ("convert_zone_ids_to_name_strings(zone_id_list=ids)",
+         lambda: MU.convert_zone_ids_to_name_strings(zone_id_list=ids)),
+        ("convert_zone_ids_to_name_strings(zone_ids=ids)",
+         lambda: MU.convert_zone_ids_to_name_strings(zone_ids=ids)),
     ])
-    globals()["_ZONES"] = got[1] if got else None
-step("13. 면 존 질의 시그니처", _zone_query)
+    return out or []
 
-def _centers():
-    mu = globals()["meshing_utilities"]
-    z = globals().get("_ZONES")
-    if not z:
-        print("    존 목록을 못 얻어 좌표 확인 생략")
-        return
-    ids = list(z)[:4] if not isinstance(z, dict) else list(z.keys())[:4]
-    print("    표본 존: " + str(ids))
-    _try_all("대표 좌표", [
-        ("get_average_bounding_box_center(face_zone_id_list=ids)",
-         lambda: mu.get_average_bounding_box_center(face_zone_id_list=ids)),
-        ("get_average_bounding_box_center(ids)",
-         lambda: mu.get_average_bounding_box_center(ids)),
-        ("get_average_bounding_box_center(face_zone_name_list=ids)",
-         lambda: mu.get_average_bounding_box_center(face_zone_name_list=ids)),
-        ("get_bounding_box_of_zone_list(zone_list=ids)",
-         lambda: mu.get_bounding_box_of_zone_list(zone_list=ids)),
-        ("get_face_zone_area(face_zone_id_list=ids)",
-         lambda: mu.get_face_zone_area(face_zone_id_list=ids)),
-    ])
-step("14. 존 대표 좌표 시그니처", _centers)
+def zone_table():
+    """면 존별 id · 이름 · 대표좌표 · 면적. 라벨링의 기초 자료."""
+    ids = MU.get_face_zones(filter="*")
+    names = zone_names(ids)
+    rows = []
+    for i, zid in enumerate(ids):
+        try:
+            c = MU.get_average_bounding_box_center(face_zone_id_list=[zid])
+        except Exception:
+            c = None
+        try:
+            a = MU.get_face_zone_area(face_zone_id_list=[zid])
+        except Exception:
+            a = None
+        rows.append({{"id": zid,
+                     "name": names[i] if i < len(names) else "?",
+                     "c": c, "area": a}})
+    return rows
+
+def _dump_zones():
+    rows = zone_table()
+    globals()["_ROWS"] = rows
+    print("    면 존 %d개" % len(rows))
+    print("    %-8s %-46s %-34s %s" % ("id", "name", "center", "area"))
+    for r in rows:
+        c = r["c"]
+        cs = ("[%9.2f %9.2f %9.2f]" % tuple(c)) if c else "?"
+        print("    %-8s %-46s %-34s %s" %
+              (r["id"], str(r["name"])[:46], cs,
+               ("%.1f" % r["area"]) if r["area"] else "?"))
+step("12. 면 존 표 (id/이름/좌표/면적)", _dump_zones)
+
+def _separate():
+    """박스형 존은 면끼리 90도이므로 40도 기준으로 쪼개면 면 단위가 됨."""
+    tui = TUI()
+    rows = globals().get("_ROWS") or []
+    targets = [r for r in rows
+               if r["name"] and "interior" not in str(r["name"])
+               and "-solid" in str(r["name"])]
+    print("    분리 대상 %d개" % len(targets))
+    done = 0
+    for r in targets[:40]:
+        for path in ("boundary.separate.sep_face_zone_by_angle",
+                     "boundary.manage.separate.sep_face_zone_by_angle"):
+            try:
+                o = tui
+                for part in path.split("."):
+                    o = getattr(o, part)
+                o(r["name"], 40)
+                done += 1
+                break
+            except Exception as e:
+                last = type(e).__name__ + ": " + str(e)[:80]
+        else:
+            print("    [--] %s : %s" % (r["name"], last))
+    print("    분리 성공 %d개" % done)
+step("13. 존 각도 분리 (40도)", _separate)
+
+def _match():
+    """분리 후 존 좌표를 face_seeds 와 최근접 매칭."""
+    rows = zone_table()
+    globals()["_ROWS2"] = rows
+    print("    분리 후 면 존 %d개" % len(rows))
+    cand = [r for r in rows if r["c"]]
+    hits = {{}}
+    for key, seed in FACE_SEEDS.items():
+        best, bd = None, 1e18
+        for r in cand:
+            c = r["c"]
+            d = ((c[0]-seed[0])**2 + (c[1]-seed[1])**2 + (c[2]-seed[2])**2) ** 0.5
+            if d < bd:
+                best, bd = r, d
+        hits[key] = (best, bd)
+        print("    %-16s -> id %-8s %-40s  거리 %.3f mm" %
+              (key, best["id"] if best else "?",
+               str(best["name"])[:40] if best else "?", bd))
+    bad = [k for k, (r, d) in hits.items() if d > 1.0]
+    print("    임계값 1mm 초과: %s" % (bad if bad else "없음"))
+    globals()["_HITS"] = hits
+step("14. face_seeds 좌표 매칭", _match)
+
+def _rename():
+    hits = globals().get("_HITS") or {{}}
+    for key, (r, d) in hits.items():
+        if r is None or d > 1.0:
+            print("    건너뜀 %s (거리 %.2f)" % (key, d))
+            continue
+        _try_all("rename %s" % key, [
+            ("rename_face_zone(zone_name=old, new_name=key)",
+             lambda r=r, key=key: MU.rename_face_zone(
+                 zone_name=r["name"], new_name=key)),
+            ("rename_face_zone(zone_id=id, new_name=key)",
+             lambda r=r, key=key: MU.rename_face_zone(
+                 zone_id=r["id"], new_name=key)),
+            ("tui.boundary.manage.name(old, key)",
+             lambda r=r, key=key: TUI().boundary.manage.name(r["name"], key)),
+        ])
+step("15. 존 이름 부여", _rename)
 
 def _seeds():
-    print("    face_seeds %d개 — 매칭 대상" % len(FACE_SEEDS))
+    print("    face_seeds %d개" % len(FACE_SEEDS))
     for k in sorted(FACE_SEEDS):
         print("      %-16s %s" % (k, FACE_SEEDS[k]))
-step("15. face_seeds 목록", _seeds)
+step("16. face_seeds 목록", _seeds)
+
+step("17. 라벨된 메시 저장",
+     lambda: TUI().file.write_mesh(MESH_OUT.replace(".msh", "_labeled.msh")))
 
 print("=" * 60)
 print("기대 셀 존 수: " + str(EXPECT_ZONES))
