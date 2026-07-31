@@ -837,4 +837,4 @@ def test_journal_embeds_face_seeds():
     assert "FACE_SEEDS = {" in j
     assert "air_inlet" in j and "ref_inlet_c01" in j
     assert "meshing_utilities" in j
-    assert "12. meshing_utilities 목록" in j
+    assert "12. 임포트 옵션" in j
