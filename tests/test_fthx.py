@@ -918,3 +918,50 @@ def test_export_rejects_overlap(tmp_path):
     assert any(k.startswith("solid_casing_") for k in B)
     # 정상 케이스는 통과해야 함
     CAD.export(p, outdir=str(tmp_path), cs=CQC.gen_single(p))
+
+
+# ══════════════════════════════════════════════════════════════
+# F0 — OpenFOAM STL 내보내기
+# ══════════════════════════════════════════════════════════════
+class TestFoamStl:
+    def _run(self, name, tmp_path):
+        from fthx import presets
+        from fthx.foam_stl import export_stl
+        return export_stl(presets.PRESETS[name](), outdir=str(tmp_path / name))
+
+    def test_tutorial_watertight_and_area(self, tmp_path):
+        m = self._run("tutorial", tmp_path)
+        assert len(m["bodies"]) == 5                      # 케이싱 제외
+        for name, b in m["bodies"].items():
+            assert b["watertight"], name
+            assert b["area_err"] < 1e-3, name
+
+    def test_probe_watertight_and_area(self, tmp_path):
+        m = self._run("probe", tmp_path)
+        assert len(m["bodies"]) == 13
+        for name, b in m["bodies"].items():
+            assert b["watertight"], name
+            assert b["area_err"] < 1e-3, name
+
+    def test_inventory_matches_build(self, tmp_path):
+        """파일 목록 ↔ build() 바디 인벤토리 1:1 (케이싱 제외)"""
+        from fthx import presets, cad
+        from fthx.foam_stl import export_stl
+        p = presets.PRESETS["probe"]()
+        m = export_stl(p, outdir=str(tmp_path / "inv"))
+        assy, _ = cad.build(p)
+        expect = {c.name for c in assy.children
+                  if not c.name.startswith("solid_casing")}
+        assert set(m["bodies"]) == expect
+        for n in expect:
+            assert (tmp_path / "inv" / f"{n}.stl").exists()
+
+    def test_global_bbox_covers_air_bbox(self, tmp_path):
+        """배경격자 bbox: 전체 합집합이 공기 도메인을 포함해야 함
+           (probe 는 벤드가 덕트 z 범위 밖으로 나감)"""
+        m = self._run("probe", tmp_path)
+        a, g = m["air_bbox_mm"], m["global_bbox_mm"]
+        for ax in "xyz":
+            assert g[ax][0] <= a[ax][0] and g[ax][1] >= a[ax][1]
+        assert g["z"][0] < a["z"][0]      # 벤드가 실제로 밖에 있음
+        assert g["z"][1] > a["z"][1]
