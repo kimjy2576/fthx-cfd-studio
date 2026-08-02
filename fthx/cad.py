@@ -293,7 +293,24 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
             inner = _box(a, b_, dk["y0"], dk["y1"], dk["z0"], dk["z1"])
             outer = _box(a, b_, dk["y0"] - w, dk["y1"] + w,
                          dk["z0"] - w, dk["z1"] + w)
-            assy.add(outer.cut(inner), name=f"solid_casing_{tag}",
+            body = outer.cut(inner)
+            # 관은 핀 팩 밖으로 나가므로 케이싱 벽(z 방향)을 뚫고 지나감.
+            # 빼주지 않으면 체적이 겹쳐 tet 초기화가 실패함
+            # (실측: "tet initialization failed ... intersections")
+            body = body.cut(outer_all)
+            if d.include_tube_fluid:
+                body = body.cut(cq.Compound.makeCompound(
+                    [_cyl(t.Di / 2, x, y, *zr[r_ * t.Nt + i_])
+                     for (r_, i_, x, y) in centers]))
+            if bends:
+                for bd in bends:
+                    up = (bd.end == "z1")
+                    ze = tz_hi if up else tz_lo
+                    th = math.atan2(xy[bd.b][1] - xy[bd.a][1],
+                                    xy[bd.b][0] - xy[bd.a][0])
+                    body = body.cut(_place_bend(
+                        _bend_solid(bd, t.Do / 2, up), th, *bd.center_xy, ze))
+            assy.add(body, name=f"solid_casing_{tag}",
                      color=cq.Color(0.6, 0.6, 0.62))
 
     # ---- z 대칭 반쪽 모델 ----
@@ -372,11 +389,47 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
     return assy, meta
 
 
+def check_overlap(assy, tol: float = 1e-6) -> list:
+    """바디 간 체적 겹침 검사.
+
+    겹치면 Fluent 볼륨 메싱이 실패함:
+      "tet initialization failed possibly due to duplicate nodes/faces
+       or intersections"
+    표면 메시까지는 통과하므로 이 검사가 없으면 30분 뒤에야 알게 됨.
+    """
+    import itertools
+    B = {}
+    for c in assy.children:
+        B[c.name] = c.obj
+    out = []
+    for a, b in itertools.combinations(sorted(B), 2):
+        A, Bo = B[a], B[b]
+        ba, bb = A.BoundingBox(), Bo.BoundingBox()
+        if (ba.xmax < bb.xmin - tol or bb.xmax < ba.xmin - tol or
+                ba.ymax < bb.ymin - tol or bb.ymax < ba.ymin - tol or
+                ba.zmax < bb.zmin - tol or bb.zmax < ba.zmin - tol):
+            continue
+        try:
+            v = A.intersect(Bo).Volume()
+        except Exception:                                    # noqa: BLE001
+            continue
+        if v > tol:
+            out.append({"a": a, "b": b, "volume_mm3": v})
+    return out
+
+
 def export(p: FTHXParams, outdir: str = "out", cs=None, plenum=None,
            fluid=None, m_total: float = 0.0) -> dict:
     out = Path(outdir)
     out.mkdir(parents=True, exist_ok=True)
     assy, meta = build(p, cs, plenum)
+    ov = check_overlap(assy)
+    meta["overlap"] = ov
+    if ov:
+        raise ValueError(
+            "바디 체적이 겹침 — Fluent 볼륨 메싱이 실패함:\n  "
+            + "\n  ".join(f"{o['a']} ∩ {o['b']} = {o['volume_mm3']:,.2f} mm³"
+                          for o in ov[:8]))
     # 분배 예측 + porous jump 계수를 메타에 심음 (Fluent 저널이 그대로 읽음)
     if plenum is not None and fluid is not None and m_total > 0 and cs is not None:
         legs = DST.legs_from_circuits(p, cs, plenum)

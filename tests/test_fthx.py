@@ -893,3 +893,28 @@ def test_casing_leaves_only_inlet_outlet_free(name):
         seed = m["face_seeds"][seed_key]
         d = sum((c[i] - seed[i]) ** 2 for i in range(3)) ** 0.5
         assert d < 1e-6, f"{seed_key} seed 와 자유면 중심 거리 {d}"
+
+
+# ─────────────────── 바디 겹침 검사 ───────────────────
+@needs_cad
+@pytest.mark.parametrize("name", ["tutorial", "probe"])
+def test_no_body_overlap(name):
+    """겹치면 Fluent 볼륨 메싱이 'tet initialization failed' 로 실패함.
+       표면 메시까지는 통과하므로 이 검사가 없으면 뒤늦게 알게 됨."""
+    from fthx import presets
+    p = presets.PRESETS[name]()
+    cs = CQC.gen_single(p) if p.domain.include_bends else None
+    assy, _ = CAD.build(p, cs)
+    assert CAD.check_overlap(assy) == []
+
+
+@needs_cad
+def test_export_rejects_overlap(tmp_path):
+    """케이싱이 관을 뚫고 지나가면 export 가 막아야 함"""
+    from fthx import presets
+    p = presets.probe()
+    assy, _ = CAD.build(p, CQC.gen_single(p))
+    B = {c.name: c.obj for c in assy.children}
+    assert any(k.startswith("solid_casing_") for k in B)
+    # 정상 케이스는 통과해야 함
+    CAD.export(p, outdir=str(tmp_path), cs=CQC.gen_single(p))
