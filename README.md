@@ -29,6 +29,10 @@
 
 ---
 
+> **새로 합류했다면** [`docs/HANDOFF.md`](docs/HANDOFF.md) 부터 읽을 것 —
+> 프로젝트 전제, 현재 상태, Fluent 경로에서 배운 함정, OpenFOAM 착수 지점이
+> 정리되어 있음.
+
 ## Fluent 서버에서 바로 실행 (Linux · 파이썬 불필요)
 
 예제 케이스가 STEP + 저널까지 만들어진 채로 들어 있음.
