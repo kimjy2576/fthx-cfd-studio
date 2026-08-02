@@ -967,3 +967,55 @@ class TestFoamStl:
             assert g[ax][0] <= a[ax][0] and g[ax][1] >= a[ax][1]
         assert g["z"][0] < a["z"][0]      # 벤드가 실제로 밖에 있음
         assert g["z"][1] > a["z"][1]
+
+
+# ══════════════════════════════════════════════════════════════
+# F1+F2 — OpenFOAM 케이스 생성 (blockMesh + snappyHexMesh 딕셔너리)
+# ══════════════════════════════════════════════════════════════
+@needs_cad
+@needs_cp
+class TestFoamCase:
+    def test_tutorial_case_files(self, tmp_path):
+        from fthx import presets
+        from fthx.openfoam import write_case
+        pl = write_case(presets.tutorial(), str(tmp_path / "c"), force=True)
+        c = tmp_path / "c"
+        for f in ("system/blockMeshDict", "system/snappyHexMeshDict",
+                  "system/surfaceFeatureExtractDict", "system/controlDict",
+                  "system/fvSchemes", "system/fvSolution", "Allrun.mesh"):
+            assert (c / f).exists(), f
+        # 존 3개: core / ref / tube — 상·하류 공기는 존이 아님
+        assert set(pl["zones"]) == {"fluid_air_core_r01",
+                                    "fluid_ref_r01t01", "solid_tube_r01t01"}
+        snap = (c / "system/snappyHexMeshDict").read_text(encoding="utf-8")
+        for z in pl["zones"]:
+            assert f"cellZone {z};" in snap
+        assert "addLayers       false" in snap          # 프리즘 불필요 결론
+
+    def test_units_are_meters(self, tmp_path):
+        """실측 함정 회귀: triSurface STL·locationInMesh 는 m 단위여야 함
+           (mm 로 넣으면 snappy FATAL 'Point ... is not inside the mesh')"""
+        from fthx import presets
+        from fthx.openfoam import write_case
+        from fthx.foam_stl import read_stl
+        write_case(presets.tutorial(), str(tmp_path / "c"), force=True)
+        tris = read_stl(tmp_path / "c/constant/triSurface/fluid_ref_r01t01.stl")
+        assert tris.max() < 1.0                         # 100mm → 0.1m
+        snap = (tmp_path / "c/system/snappyHexMeshDict").read_text("utf-8")
+        loc = [float(x) for x in
+               snap.split("locationInMesh (")[1].split(")")[0].split()]
+        assert all(abs(v) < 1.0 for v in loc)
+
+    def test_wall_level_resolves_thickness(self):
+        """관벽 존 형성 조건: level 셀 크기 < t_wall"""
+        from fthx import presets
+        from fthx.openfoam import plan
+        pl = plan(presets.tutorial())
+        assert pl["h_at"][f"level{pl['lv_wall']}"] < pl["t_wall_mm"]
+
+    def test_probe_not_implemented(self, tmp_path):
+        import pytest as _pt
+        from fthx import presets
+        from fthx.openfoam import write_case
+        with _pt.raises(NotImplementedError):
+            write_case(presets.probe(), str(tmp_path / "p"))

@@ -44,6 +44,31 @@ bash scripts/verify_stl.sh out_foam
 2. 확인: 벤드↔관 끝 맞물림 · 코어 박스의 관 구멍 · 상·하류 박스 접합
 3. 어긋난 부분은 스크린샷으로 회신
 
+## 메시 단계 — F1+F2 커밋부터 (WSL, tutorial ~1분)
+
+1·2단계 통과 후, 케이스 생성 커밋이면 실제 메싱까지:
+
+```powershell
+# Windows — 케이스 생성 (딕셔너리+STL(m 단위)+Allrun)
+.venv\Scripts\python scripts\make_case.py tutorial
+```
+
+```bash
+# WSL — 실행은 WSL 파일시스템에서 (mnt/c 는 I/O 느림)
+cp -r /mnt/c/Users/kimjy/dev/fthx-cfd-studio/out_foam/case_tutorial ~/cases/
+cd ~/cases/case_tutorial && ./Allrun.mesh
+```
+
+기대 요약:
+```
+Snapped mesh : cells:16만±   (Fluent 68,641 과 같은 자릿수면 통과)
+  fluid_air_core_r01: >0
+  fluid_ref_r01t01:   >0
+  solid_tube_r01t01:  >0     ← 0 이면 관벽 존 형성 실패
+Mesh OK.
+```
+실패 시 해당 log.* 파일 마지막 30줄을 회신.
+
 ## 회신 형식 (2단계 기준)
 
 ```
