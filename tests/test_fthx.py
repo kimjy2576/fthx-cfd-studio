@@ -1019,3 +1019,13 @@ class TestFoamCase:
         from fthx.openfoam import write_case
         with _pt.raises(NotImplementedError):
             write_case(presets.probe(), str(tmp_path / "p"))
+
+    def test_no_crlf_in_case_files(self, tmp_path):
+        """실측 함정 회귀: Windows 에서 생성 시 CRLF 이 들어가면
+           WSL 에서 shebang 이 'bash\\r' 로 깨짐 — 전 파일 LF 강제"""
+        from fthx import presets
+        from fthx.openfoam import write_case
+        write_case(presets.tutorial(), str(tmp_path / "c"), force=True)
+        for f in (tmp_path / "c").rglob("*"):
+            if f.is_file() and f.suffix != ".stl":
+                assert b"\r" not in f.read_bytes(), f.name

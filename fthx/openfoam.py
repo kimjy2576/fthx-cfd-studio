@@ -323,15 +323,15 @@ def write_case(p: FTHXParams, case_dir: str, force: bool = False) -> dict:
             zones[n] = pl["lv_ref"]
 
     (case / "system" / "blockMeshDict").write_text(
-        _block_mesh_dict(p, pl), encoding="utf-8")
+        _block_mesh_dict(p, pl), encoding="utf-8", newline="\n")
     (case / "system" / "snappyHexMeshDict").write_text(
-        _snappy_dict(p, pl, zones), encoding="utf-8")
+        _snappy_dict(p, pl, zones), encoding="utf-8", newline="\n")
     (case / "system" / "surfaceFeatureExtractDict").write_text(
-        _feature_dict(sorted(zones)), encoding="utf-8")
+        _feature_dict(sorted(zones)), encoding="utf-8", newline="\n")
     for name, body in _MINI.items():
-        (case / "system" / name).write_text(_hdr(name) + body, encoding="utf-8")
+        (case / "system" / name).write_text(_hdr(name) + body, encoding="utf-8", newline="\n")
     ar = case / "Allrun.mesh"
-    ar.write_text(_ALLRUN, encoding="utf-8")
+    ar.write_text(_ALLRUN, encoding="utf-8", newline="\n")
     ar.chmod(0o755)
 
     # 상·하류 STL 은 triSurface 에서 제거 — 존으로 안 쓰므로 혼동 방지
