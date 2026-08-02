@@ -5,11 +5,14 @@ Claude 가 push 할 때마다 아래 순서로 확인함. 1·2단계는 매번, 
 
 ## 1단계 — 회귀 + STL 생성 (Windows PowerShell, ~1분)
 
+반드시 레포 venv 의 python 을 사용 (전역 python 에는 cadquery 가 없음).
+`.venv` 이 없으면 `run.bat` 을 한 번 실행해 생성 (서버는 Ctrl+C 로 종료).
+
 ```powershell
 cd fthx-cfd-studio
 git pull
-python -m pytest tests/ -q          # 103+ passed 확인
-python scripts/make_stl.py          # 전 프리셋 → out_foam/<프리셋>/
+.venv\Scripts\python -m pytest tests/ -q     # 실패 0 확인 (cadquery 있으면 skip 없이 103+)
+.venv\Scripts\python scripts\make_stl.py     # 전 프리셋 → out_foam/<프리셋>/
 ```
 
 `make_stl.py` 가 예외 없이 `[OK]` 를 찍으면 내장 검증

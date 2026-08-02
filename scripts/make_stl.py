@@ -10,8 +10,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from fthx import presets                       # noqa: E402
-from fthx.foam_stl import export_stl           # noqa: E402
+try:
+    from fthx import presets                       # noqa: E402
+    from fthx.foam_stl import export_stl           # noqa: E402
+except ModuleNotFoundError as e:
+    print(f"[오류] {e.name} 모듈 없음 — 전역 python 이 아니라 레포 venv 로 실행할 것:\n"
+          "  .venv\\Scripts\\python scripts\\make_stl.py\n"
+          "  (.venv 이 없으면 run.bat 을 한 번 실행해 생성 — 서버는 Ctrl+C 로 종료)",
+          file=sys.stderr)
+    sys.exit(2)
 
 
 def main(names):

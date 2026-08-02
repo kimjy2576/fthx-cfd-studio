@@ -923,6 +923,8 @@ def test_export_rejects_overlap(tmp_path):
 # ══════════════════════════════════════════════════════════════
 # F0 — OpenFOAM STL 내보내기
 # ══════════════════════════════════════════════════════════════
+@needs_cad
+@needs_cp
 class TestFoamStl:
     def _run(self, name, tmp_path):
         from fthx import presets
