@@ -3,6 +3,35 @@
 Claude 가 push 할 때마다 아래 순서로 확인함. 1·2단계는 매번, 3단계는 형상이
 바뀐 커밋에서만.
 
+## 통합 실행 (권장) — 두 줄로 끝
+
+```powershell
+# Windows
+cd C:\Users\kimjy\dev\fthx-cfd-studio ; git pull
+```
+```bash
+# WSL
+cd /mnt/c/Users/kimjy/dev/fthx-cfd-studio && bash scripts/check.sh
+```
+
+`scripts/check.sh` 가 아래 전 단계를 순서대로 수행함:
+1. pytest 회귀 (Windows venv 의 python.exe 를 WSL 에서 직접 호출)
+2. STL 생성 + surfaceCheck 교차검증
+3. tutorial 케이스 생성
+4. `~/cases/case_tutorial` 로 복사 → 메싱 → checkMesh → cellZone 검산
+
+실패하면 해당 로그의 마지막 30줄을 자동으로 출력하고 멈춤 — 그 출력을
+그대로 회신하면 됨. 끝까지 가면 `ALL OK` — 그 출력 전체를 회신.
+
+3단계(ParaView 육안)만 자동화 밖: 커밋 메시지에 **[geom]** 태그가 있을 때
+`out_foam/probe/*.stl` 을 열어 확인.
+
+빠른 반복이 필요할 때: `FTHX_PYTEST_K="FoamCase" bash scripts/check.sh`
+
+---
+
+아래는 단계별 수동 실행 (문제 원인 분리가 필요할 때만):
+
 ## 1단계 — 회귀 + STL 생성 (Windows PowerShell, ~1분)
 
 반드시 레포 venv 의 python 을 사용 (전역 python 에는 cadquery 가 없음).
