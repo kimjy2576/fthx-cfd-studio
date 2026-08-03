@@ -213,7 +213,8 @@ ref_outlet_c01  -> fluid_ref_r01t03-solid:1  거리 0.010 mm
 | 셀 존 | 16 (= STEP 바디 수) |
 | 셀 | 285,051 |
 | 최소 직교품질 | 0.24 |
-| 소요 | 0.14 분 |
+| 소요 | 0.15 분 |
+| 메시 파일 | mesh.msh.h5 / mesh_labeled.msh.h5 각 59.9 MB |
 
 ## 이르기까지 겪은 것
 
@@ -229,3 +230,24 @@ ref_outlet_c01  -> fluid_ref_r01t03-solid:1  거리 0.010 mm
 `face_seeds` 는 4개면 충분함 — 덕트 벽은 케이싱과의 계면이 되어 별도 이름이
 불필요. 케이싱이 없으면 상·하류 박스 자유면(입구+측벽4)이 한 덩어리가 되어
 좌표 매칭이 성립하지 않으므로 **케이싱 사용이 사실상 필수**임.
+
+
+## 저장 경로 주의
+
+LSF 로 제출되면 작업 디렉터리가 바뀔 수 있음. 상대 경로로 저장하면 엉뚱한 곳에
+쓰이고, 폴더에 이전 실행 파일이 남아 있으면 성공한 것처럼 보임.
+→ 저널이 **자기 파일 위치(`_HERE`) 기준 절대 경로**를 쓰도록 함.
+→ `17. 저장 파일 확인` 이 경로·크기·시각을 직접 출력해 확정할 수 있게 함.
+
+## M2 최종 (2026-08-03, 32 core, 깨끗한 clone)
+
+```
+17 단계 전부 OK · 셀 존 16 · 셀 285,051 · 품질 0.24
+mesh.msh.h5 / mesh_labeled.msh.h5  각 59.9 MB
+
+air_inlet       -> fluid_air_up-solid:1      0.000 mm
+air_outlet      -> fluid_air_down-solid:1    0.000 mm
+ref_inlet_c01   -> fluid_ref_r01t01-solid:1  0.004 mm
+ref_outlet_c01  -> fluid_ref_r01t03-solid:1  0.010 mm
+임계값 1mm 초과: 없음
+```
