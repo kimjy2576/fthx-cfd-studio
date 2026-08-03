@@ -54,10 +54,20 @@ def fluent_journal(p: FTHXParams, step_name: str = "model.step",
 #   probe 실측: 4코어 164,461 → 32코어 229,026 (+39%).
 #   케이스 간 비교를 할 때는 -t 값을 고정할 것.
 
+import os
 import traceback
 
-STEP        = r"{step_name}"
-MESH_OUT    = r"{mesh_out}"
+# LSF 로 제출되면 작업 디렉터리가 바뀔 수 있음. 상대 경로로 저장하면
+# 엉뚱한 곳에 쓰이고, 폴더에는 이전 실행 파일이 남아 있어 성공한 것처럼 보임
+# (실측: 로그는 새 실행인데 mesh.msh.h5 는 3일 전 파일이었음).
+# 저널 파일이 있는 폴더를 기준으로 절대 경로를 씀.
+try:
+    _HERE = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    _HERE = os.getcwd()
+
+STEP        = os.path.join(_HERE, r"{step_name}")
+MESH_OUT    = os.path.join(_HERE, r"{mesh_out}")
 MIN_SIZE    = {su["min_mm"]}
 MAX_SIZE    = {su["max_mm"]}
 GROWTH      = {su["growth"]}
@@ -348,7 +358,8 @@ def _write_labeled():
 def _verify():
     """저장된 파일을 실제로 확인. 경로·시각·크기를 남겨 이전 실행 파일과
        혼동하지 않게 함 (실측: 로그는 새 실행인데 파일은 옛 것이었음)."""
-    import os, time
+    import time
+    print("    저널 폴더: " + _HERE)
     print("    작업 폴더: " + os.getcwd())
     for f in (MESH_OUT, LABELED):
         if os.path.exists(f):
@@ -358,6 +369,8 @@ def _verify():
                    time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime))))
         else:
             print("    [!!] %-24s 없음" % f)
+    fresh = [f for f in os.listdir(_HERE) if f.endswith(".msh.h5")]
+    print("    폴더 내 메시 파일: " + (", ".join(sorted(fresh)) or "없음"))
 
 step("16. 라벨된 메시 저장", _write_labeled)
 step("17. 저장 파일 확인", _verify)
