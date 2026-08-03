@@ -4,6 +4,7 @@
 #   ./go.sh                 probe · 32 core
 #   ./go.sh tutorial 8      케이스 · 코어
 #   ./go.sh probe 32 --no-pull
+#   STAGE=setup ./go.sh probe 8      메시 후 해석 설정
 #
 # 완료를 기다렸다가 결과까지 찍으므로 bjobs 를 손으로 볼 필요가 없음.
 
@@ -31,13 +32,20 @@ fi
 
 # ── 2. 이전 결과 정리 ─────────────────────────────────────
 echo "[2/5] 이전 결과 정리"
-rm -f "$DIR"/*.trn "$DIR"/*.lsflog "$DIR"/*.msh.h5 "$DIR"/hosts.* 2>/dev/null
+if [ "${STAGE:-mesh}" = "setup" ]; then
+  rm -f "$DIR"/*.trn "$DIR"/*.lsflog "$DIR"/*.cas.h5 "$DIR"/hosts.* 2>/dev/null
+else
+  rm -f "$DIR"/*.trn "$DIR"/*.lsflog "$DIR"/*.msh.h5 "$DIR"/*.cas.h5 "$DIR"/hosts.* 2>/dev/null
+  rm -rf "$DIR"/*_workflow_files 2>/dev/null
+fi
 rm -rf "$DIR"/*_workflow_files 2>/dev/null
 
 # ── 3. 제출 ───────────────────────────────────────────────
 cd "$DIR"
-echo "[3/5] 제출 — $CASE · ${CORES} core"
-OUT=$(fluent 3d -meshing -g -t"$CORES" -i mesh.py 2>&1)
+echo "[3/5] 제출 — $CASE · ${CORES} core · ${STAGE:-mesh}"
+JOURNAL=mesh.py; MODE="3d -meshing"
+if [ "${STAGE:-mesh}" = "setup" ]; then JOURNAL=setup.py; MODE="3ddp"; fi
+OUT=$(fluent $MODE -g -t"$CORES" -i "$JOURNAL" 2>&1)
 echo "$OUT" | sed 's/^/      /'
 JOB=$(echo "$OUT" | grep -oE 'Job <[0-9]+>' | grep -oE '[0-9]+' | head -1)
 

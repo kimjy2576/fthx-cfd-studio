@@ -367,6 +367,13 @@ def _package_bytes(p: FTHXParams, cs) -> bytes:
                    exporters.fluent_journal(p, "model.step", "mesh.msh.h5",
                                             n_bodies=n,
                                             face_seeds=meta.get("face_seeds")))
+        nc = len(cs.circuits) if cs is not None else 1
+        z.writestr("fthx_case/setup.py",
+                   exporters.solver_journal(p, "mesh_labeled.msh.h5",
+                                            "case.cas.h5", n_circuit=nc))
+        z.writestr("fthx_case/closure.json",
+                   json.dumps(__import__("fthx").closure.summary(p, nc),
+                              indent=2, ensure_ascii=False))
         z.writestr("fthx_case/RUN.md", exporters.run_md(p, est=est, n_bodies=n))
         z.writestr("fthx_case/settings.txt", exporters.settings_txt(p, n_bodies=n))
         z.writestr("fthx_case/bodies.txt", "\n".join(bodies))

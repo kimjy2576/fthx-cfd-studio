@@ -1029,3 +1029,61 @@ class TestFoamCase:
         for f in (tmp_path / "c").rglob("*"):
             if f.is_file() and f.suffix != ".stl":
                 assert b"\r" not in f.read_bytes(), f.name
+
+
+# ─────────────────── M3: 포러스 폐합 · 솔버 저널 ───────────────────
+def test_closure_magnitudes(p):
+    """계수가 FT-HX 통상 범위 안에 있는지"""
+    from fthx import closure
+    a = closure.air_side(p)
+    assert 300 < a["Re_Dc"] < 5000            # Wang 상관식 적용 범위
+    assert 0.005 < a["j"] < 0.05
+    assert 0.005 < a["f"] < 0.10
+    assert 10 < a["C2_1perm"] < 1000          # 1/m
+    assert 20 < a["h_W_m2K"] < 200            # W/m2K
+    assert 0 < a["porosity"] < 1
+
+
+def test_porous_dp_consistency(p):
+    """C2 로 역산한 ΔP 가 상관식 ΔP 와 일치해야 함 (superficial 기준)"""
+    from fthx import closure
+    a = closure.air_side(p)
+    d = p.derived()
+    rho = p.operating_derived()["air"]["rho"]
+    us = p.operating.air.V_face
+    L = d["depth_mm"] / 1000.0
+    assert a["C2_1perm"] * rho / 2 * us ** 2 * L == pytest.approx(
+        a["dp_core_Pa"], rel=1e-9)
+
+
+def test_fin_efficiency_range(p):
+    from fthx import closure
+    a = closure.air_side(p)
+    e = closure.fin_efficiency(p, a["h_W_m2K"])
+    assert 0.5 < e["eta_fin"] < 1.0
+    assert e["eta_fin"] < e["eta_overall"] < 1.0    # 관 표면이 효율 1
+    assert e["h_eff_W_m2K"] < a["h_W_m2K"]
+
+
+@pytest.mark.parametrize("ft", ["plain", "wavy", "louver", "slit"])
+def test_fin_type_ordering(ft):
+    """루버가 평판보다 j·f 가 커야 함"""
+    from fthx import closure
+    base = closure.air_side(FTHXParams())
+    q = FTHXParams(fin={"FPI": 14, "t_f": 0.115, "fin_type": ft})
+    a = closure.air_side(q)
+    assert a["j"] >= base["j"] - 1e-12
+    assert a["f"] >= base["f"] - 1e-12
+
+
+def test_solver_journal_is_valid_python():
+    import ast
+    from fthx import presets, exporters, closure
+    p = presets.probe()
+    j = exporters.solver_journal(p, n_circuit=1)
+    ast.parse(j)
+    c = closure.summary(p, 1)
+    assert f'C2        = {c["air"]["C2_1perm"]:.4f}' in j
+    assert "superficial" in j                  # 좌표계 경고
+    assert "Laminar Zone" in j                 # 포러스 내 가짜 난류 방지
+    assert "air_inlet" in j and "air_outlet" in j

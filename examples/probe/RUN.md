@@ -51,7 +51,18 @@ ls -lh mesh.msh.h5
 grep -iE "error|warning" $(ls -t *.trn | head -1) | head -20
 ```
 
-## 4) 판정
+## 4) 해석 설정 (M3)
+
+메시가 나온 뒤:
+
+```bash
+fluent 3ddp -g -t8 -i setup.py
+```
+
+포러스 계수·경계조건·물성이 형상과 운전 조건에서 유도돼 들어감.
+`closure.json` 에 그 값들이 정리되어 있음.
+
+## 5) 판정
 
 | 항목 | 기대값 |
 |---|---|
