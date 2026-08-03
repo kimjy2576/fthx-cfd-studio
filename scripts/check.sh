@@ -36,9 +36,12 @@ die()  { echo; echo "[중단] $1"
          [ -n "${2:-}" ] && [ -f "$2" ] && { echo "── ${2##*/} 마지막 30줄 ──"; tail -30 "$2"; }
          exit 1; }
 
-step "1/4 회귀 테스트 (pytest) — CAD 테스트 포함 수 분 소요, 점(.)이 진행 표시"
-# 빠른 반복:  FTHX_PYTEST_K="FoamCase" bash scripts/check.sh
-"$PY" -m pytest tests/ -q ${FTHX_PYTEST_K:+-k "$FTHX_PYTEST_K"} \
+step "1/4 회귀 테스트 (pytest)"
+# 기본: OpenFOAM 경로(Foam*) 만 — cadquery 설치 후 무거운 CAD 융합 테스트가
+# 전부 돌면 수 분 걸리므로 루틴에서는 제외. 전체는 FTHX_FULL=1 로.
+PYK="${FTHX_PYTEST_K:-Foam}"
+[ "${FTHX_FULL:-0}" = "1" ] && PYK=""
+"$PY" -m pytest tests/ -q ${PYK:+-k "$PYK"} \
     2>&1 | tee /tmp/fthx_pytest.log
 [ "${PIPESTATUS[0]}" -eq 0 ] || die "pytest 실패" /tmp/fthx_pytest.log
 

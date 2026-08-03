@@ -26,7 +26,7 @@ cd /mnt/c/Users/kimjy/dev/fthx-cfd-studio && bash scripts/check.sh
 3단계(ParaView 육안)만 자동화 밖: 커밋 메시지에 **[geom]** 태그가 있을 때
 `out_foam/probe/*.stl` 을 열어 확인.
 
-빠른 반복이 필요할 때: `FTHX_PYTEST_K="FoamCase" bash scripts/check.sh`
+빠른 반복이 필요할 때: `FTHX_FULL=1 bash scripts/check.sh` (전체 스위트), `FTHX_PYTEST_K="FoamCase" bash scripts/check.sh` (더 좁게)
 
 ---
 
