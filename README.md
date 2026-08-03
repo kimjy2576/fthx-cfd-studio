@@ -38,6 +38,18 @@
 예제 케이스가 STEP + 저널까지 만들어진 채로 들어 있음.
 **Fluent 외에는 아무것도 설치할 필요가 없음.**
 
+### 한 번에 (권장)
+
+```bash
+cd ~/fthx-cfd-studio
+./go.sh                    # probe · 32 core
+./go.sh tutorial 8         # 케이스 · 코어
+./go.sh probe 32 --no-pull # git pull 없이
+```
+
+갱신 → 이전 결과 정리 → 제출 → **완료 대기** → 결과 출력 → 판정까지 한 번에.
+`bjobs` 를 손으로 볼 필요가 없음.
+
 ### 최초 1회
 
 ```bash
