@@ -12,6 +12,7 @@
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
+export PYTHONUTF8=1 PYTHONIOENCODING=utf-8   # python.exe 가 cp949 로 쓰면 grep 이 binary 로 오인
 
 # ── 파이썬 선택: Windows venv 우선, 없으면(순수 리눅스) python3
 if [ -x ".venv/Scripts/python.exe" ]; then PY=".venv/Scripts/python.exe"

@@ -255,7 +255,7 @@ solvers {}
 """,
 }
 
-_ALLRUN = """\
+_ALLRUN = r"""\
 #!/usr/bin/env bash
 # 메시 생성 + 진단 (한 번 실행으로 여러 검산을 같이 수행)
 cd "$(dirname "$0")"
