@@ -112,6 +112,44 @@ def _porous():
     """공기 코어를 포러스로. superficial velocity 기준.
        Laminar Zone 을 켜 포러스 내부의 가짜 난류점성을 막음."""
     print("    porosity %.6f · C2 %.2f 1/m · alpha %.3e m2" % (POROSITY, C2, ALPHA))
+    g = globals()
+    root = g.get("solver") or g.get("setup") or g.get("root")
+    czc = None
+    for path in ("setup.cell_zone_conditions", "cell_zone_conditions"):
+        o = root
+        for part in path.split("."):
+            o = getattr(o, part, None)
+            if o is None:
+                break
+        if o is not None:
+            czc = o
+            print("    셀존 경로: " + path)
+            break
+    if czc is not None:
+        fl = getattr(czc, "fluid", None)
+        if fl is not None:
+            try:
+                names = [n for n in list(fl) if "air_core" in n]
+            except Exception:
+                names = []
+            print("    포러스 대상: %s" % names)
+            for n in names:
+                try_all("porous %s" % n, [
+                    ("set_state", lambda n=n: fl[n].set_state({
+                        "porous": True,
+                        "porous_zone": {
+                            "porosity": POROSITY,
+                            "direction_1_viscous_resistance": 1.0 / ALPHA,
+                            "direction_2_viscous_resistance": 1.0 / ALPHA,
+                            "direction_3_viscous_resistance": 1.0 / ALPHA,
+                            "direction_1_inertial_resistance": C2,
+                            "direction_2_inertial_resistance": C2,
+                            "direction_3_inertial_resistance": C2,
+                        },
+                        "laminar": True})),
+                    ("porous flag only",
+                     lambda n=n: setattr(fl[n], "porous", True)),
+                ])
     print("    → GUI: Cell Zone Conditions > fluid_air_core* > Porous Zone")
     print("      Viscous Resistance 1/alpha = %.4e 1/m2" % (1.0 / ALPHA))
     print("      Inertial Resistance C2     = %.4f 1/m" % C2)
@@ -120,23 +158,78 @@ def _porous():
     print("      Relative Velocity Resistance Formulation = OFF (superficial)")
 step("5. 포러스 계수 (값 출력)", _porous)
 
-# ── 6. 경계조건 ────────────────────────────────────────────
-def _bc():
-    t = TUI()
-    try_all("공기 입구", [
-        ("velocity-inlet air_inlet",
-         lambda: t.define.boundary_conditions.velocity_inlet(
-             "air_inlet", "no", "no", "yes", "yes", "no", V_FACE, "no", 0,
-             "no", "no", "yes", 5, 10, "yes", T_AIR_IN)),
+# ── 6. 설정 객체 탐색 ──────────────────────────────────────
+# TUI 경로 추측은 메싱에서 이미 실패했음: getattr 이 없는 이름에도 빈 메뉴를
+# 돌려주고 호출 시 "'TUIMenu' object has no attribute" 가 남.
+# (실측: tui.define.boundary_conditions.velocity_inlet 없음)
+# → globals 의 solver 설정 객체를 직접 훑어 실제 경로를 확정한다.
+def _probe_api():
+    g = globals()
+    for nm in ("solver", "setup", "root"):
+        o = g.get(nm)
+        if o is None:
+            continue
+        ns = [n for n in dir(o) if not n.startswith("_")]
+        print("    %-10s %-28s %s" % (nm, str(type(o))[:28], ns[:14]))
+        for sub in ("setup", "boundary_conditions", "cell_zone_conditions"):
+            c = getattr(o, sub, None)
+            if c is not None:
+                cn = [n for n in dir(c) if not n.startswith("_")]
+                print("      .%-22s %s" % (sub, cn[:18]))
+step("6a. 설정 객체 탐색", _probe_api)
+
+def _bc_zones():
+    """존 이름이 솔버에서도 유지되는지 + BC 설정 경로 찾기."""
+    g = globals()
+    root = g.get("solver") or g.get("setup") or g.get("root")
+    bc = None
+    for path in ("setup.boundary_conditions", "boundary_conditions"):
+        o = root
+        for part in path.split("."):
+            o = getattr(o, part, None)
+            if o is None:
+                break
+        if o is not None:
+            bc = o
+            print("    BC 경로: " + path)
+            break
+    if bc is None:
+        print("    BC 객체를 찾지 못함")
+        return
+    for t in ("velocity_inlet", "pressure_outlet", "wall", "mass_flow_inlet"):
+        c = getattr(bc, t, None)
+        if c is None:
+            print("      %-18s 없음" % t)
+            continue
+        try:
+            keys = list(c)
+        except Exception:
+            keys = "?"
+        print("      %-18s 존: %s" % (t, str(keys)[:120]))
+    globals()["_BC"] = bc
+step("6b. 경계조건 존 목록", _bc_zones)
+
+def _set_bc():
+    bc = globals().get("_BC")
+    if bc is None:
+        print("    BC 객체 없음 — 6b 결과 확인 필요")
+        return
+    try_all("공기 입구 %s m/s, %.1f K" % (V_FACE, T_AIR_IN), [
+        ("velocity_inlet['air_inlet'] = dict",
+         lambda: bc.velocity_inlet["air_inlet"].set_state({
+             "momentum": {"velocity_magnitude": {"value": V_FACE}},
+             "thermal": {"t": {"value": T_AIR_IN}}})),
+        ("velocity_inlet['air_inlet'].momentum",
+         lambda: setattr(bc.velocity_inlet["air_inlet"].momentum
+                         .velocity_magnitude, "value", V_FACE)),
     ])
-    try_all("공기 출구", [
-        ("pressure-outlet air_outlet",
-         lambda: t.define.boundary_conditions.pressure_outlet(
-             "air_outlet", "yes", "no", 0, "no", T_AIR_IN, "no", "yes",
-             "no", "no", "yes", 5, 10, "yes", "no", "no", "no")),
+    try_all("공기 출구 0 Pa gauge", [
+        ("pressure_outlet['air_outlet'] = dict",
+         lambda: bc.pressure_outlet["air_outlet"].set_state({
+             "momentum": {"gauge_pressure": {"value": 0.0}},
+             "thermal": {"t": {"value": T_AIR_IN}}})),
     ])
-    print("    냉매 입구 %d개 · 회로당 %.5f kg/s" % (N_CIRCUIT, M_REF / N_CIRCUIT))
-step("6. 경계조건", _bc)
+step("6c. 경계조건 설정", _set_bc)
 
 # ── 7. 열 모델 안내 ────────────────────────────────────────
 def _thermal():
