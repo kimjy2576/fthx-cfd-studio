@@ -193,3 +193,39 @@ Fluent 은 **인접 관계가 같은 면을 한 존으로 묶음.** 면적 검�
 
 대안: 솔버의 `/mesh/modify-zones/separate-face-zone-by-angle` 는 오래된 안정
 명령이고, M3(SETUP)가 어차피 솔버에서 도므로 거기서 라벨링해도 됨.
+
+
+---
+
+# M2 완료 (2025 R1, 32 core)
+
+케이싱 solid 도입으로 **좌표 기반 경계 라벨링이 성립함.**
+
+```
+air_inlet       -> fluid_air_up-solid:1      거리 0.000 mm
+air_outlet      -> fluid_air_down-solid:1    거리 0.000 mm
+ref_inlet_c01   -> fluid_ref_r01t01-solid:1  거리 0.004 mm
+ref_outlet_c01  -> fluid_ref_r01t03-solid:1  거리 0.010 mm
+```
+
+| | 값 |
+|---|---|
+| 셀 존 | 16 (= STEP 바디 수) |
+| 셀 | 285,051 |
+| 최소 직교품질 | 0.24 |
+| 소요 | 0.14 분 |
+
+## 이르기까지 겪은 것
+
+1. **각도 분리(sep-face-zone-by-angle)** — 존 이름을 `p-plane-N-M` 으로 파괴하고
+   메시를 47MB→3.6MB 로 망가뜨림(SIGSEGV 동반). 쓰면 안 됨
+2. **케이싱이 관을 관통** — 코어 케이싱이 핀 팩만 덮는데 관은 그 밖까지 나가
+   체적이 겹침(6쌍). 볼륨 메싱이 `tet initialization failed` 로 실패.
+   표면 메시는 통과하므로 늦게 발견됨 → `cad.check_overlap()` 으로 CAD 단계에서 차단
+3. **케이싱에서 관·냉매·벤드를 cut** 하여 해결
+
+## 확정
+
+`face_seeds` 는 4개면 충분함 — 덕트 벽은 케이싱과의 계면이 되어 별도 이름이
+불필요. 케이싱이 없으면 상·하류 박스 자유면(입구+측벽4)이 한 덩어리가 되어
+좌표 매칭이 성립하지 않으므로 **케이싱 사용이 사실상 필수**임.

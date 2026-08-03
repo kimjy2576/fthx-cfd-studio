@@ -340,8 +340,27 @@ def _seeds():
         print("      %-16s %s" % (k, FACE_SEEDS[k]))
 step("15. face_seeds 목록", _seeds)
 
-step("16. 라벨된 메시 저장",
-     lambda: TUI().file.write_mesh(MESH_OUT.replace(".msh", "_labeled.msh")))
+LABELED = MESH_OUT.replace(".msh", "_labeled.msh")
+
+def _write_labeled():
+    TUI().file.write_mesh(LABELED)
+
+def _verify():
+    """저장된 파일을 실제로 확인. 경로·시각·크기를 남겨 이전 실행 파일과
+       혼동하지 않게 함 (실측: 로그는 새 실행인데 파일은 옛 것이었음)."""
+    import os, time
+    print("    작업 폴더: " + os.getcwd())
+    for f in (MESH_OUT, LABELED):
+        if os.path.exists(f):
+            st = os.stat(f)
+            print("    [OK] %-24s %8.1f MB  %s" %
+                  (f, st.st_size / 1e6,
+                   time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime))))
+        else:
+            print("    [!!] %-24s 없음" % f)
+
+step("16. 라벨된 메시 저장", _write_labeled)
+step("17. 저장 파일 확인", _verify)
 
 print("=" * 60)
 print("기대 셀 존 수: " + str(EXPECT_ZONES))

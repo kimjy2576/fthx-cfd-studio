@@ -360,10 +360,14 @@ def build(p: FTHXParams, cs: "CQC.CircuitSet | None" = None,
         "face_seeds": {
             "air_inlet":  [x0 - d.L_up, yc, zc],
             "air_outlet": [x1 + d.L_down, yc, zc],
-            "duct_y_min": [(x0 + x1) / 2, dk["y0"], zc],
-            "duct_y_max": [(x0 + x1) / 2, dk["y1"], zc],
-            "duct_z_min": [(x0 + x1) / 2, yc, dk["z0"]],
-            "duct_z_max": [(x0 + x1) / 2, yc, dk["z1"]],
+            # 덕트 벽은 케이싱이 있으면 계면이 되어 별도 이름이 불필요함.
+            # 없을 때만 seed 를 둠 (그 경우 상·하류 박스 자유면에 묶이므로
+            # 좌표 매칭이 성립하지 않음 — 케이싱 사용을 권장)
+            **({} if p.duct.wall_t > 0 else {
+                "duct_y_min": [(x0 + x1) / 2, dk["y0"], zc],
+                "duct_y_max": [(x0 + x1) / 2, dk["y1"], zc],
+                "duct_z_min": [(x0 + x1) / 2, yc, dk["z0"]],
+                "duct_z_max": [(x0 + x1) / 2, yc, dk["z1"]]}),
         },
         "zone_prefix": {"fluid_air_": "fluid", "fluid_ref_": "fluid",
                         "solid_": "solid", "fluid_air_core": "porous"},
