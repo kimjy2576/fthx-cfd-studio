@@ -36,12 +36,12 @@ die()  { echo; echo "[중단] $1"
          [ -n "${2:-}" ] && [ -f "$2" ] && { echo "── ${2##*/} 마지막 30줄 ──"; tail -30 "$2"; }
          exit 1; }
 
-step "1/4 회귀 테스트 (pytest)"
+step "1/4 회귀 테스트 (pytest) — CAD 테스트 포함 수 분 소요, 점(.)이 진행 표시"
 # 빠른 반복:  FTHX_PYTEST_K="FoamCase" bash scripts/check.sh
 "$PY" -m pytest tests/ -q ${FTHX_PYTEST_K:+-k "$FTHX_PYTEST_K"} \
-    > /tmp/fthx_pytest.log 2>&1 \
-    || die "pytest 실패" /tmp/fthx_pytest.log
-tail -1 /tmp/fthx_pytest.log
+    2>&1 | tee /tmp/fthx_pytest.log
+[ "${PIPESTATUS[0]}" -eq 0 ] || die "pytest 실패" /tmp/fthx_pytest.log
+
 
 step "2/4 STL 생성 + surfaceCheck 교차검증"
 "$PY" scripts/make_stl.py > /tmp/fthx_stl.log 2>&1 \
