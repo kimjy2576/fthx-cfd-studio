@@ -62,6 +62,15 @@ while true; do
   case "$ST" in
     DONE|EXIT) echo "      $ST ($((SECONDS-T0))초)"; break;;
   esac
+  # 저널이 끝났는지 로그로 판정 — 솔버는 스스로 종료하지 않을 수 있음
+  if [ $((SECONDS-T0)) -gt 20 ]; then
+    L=$(ls -t "$DIR"/*.trn 2>/dev/null | head -1)
+    if [ -n "$L" ] && grep -q "SETUP 완료\|위 check-mesh 출력의" "$L" 2>/dev/null; then
+      echo; echo "      저널 종료 확인 — 작업 정리 ($((SECONDS-T0))초)"
+      bkill "$JOB" >/dev/null 2>&1
+      sleep 3; break
+    fi
+  fi
   if [ "$ST" != "$LAST" ]; then
     printf "      %s" "$ST"
     [ "$ST" = "PEND" ] && printf " — %s" \

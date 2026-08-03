@@ -6,6 +6,12 @@ echo "=== 단계 ==="
 grep -E "^<<<" "$LOG" | tail -20
 echo "=== 결과 ==="
 grep -E "cells were created|Total Number of Cell Zones|Orthogonal Quality" "$LOG"
+if grep -q "SETUP 완료" "$LOG" 2>/dev/null; then
+  echo "=== SETUP (M3) ==="
+  sed -n '/5. 포러스 계수/,/<<</p' "$LOG" | grep -E "porosity|Viscous|Inertial|Porosity|Laminar|Relative"
+  sed -n '/7. 열 모델/,/<<</p' "$LOG" | grep -E "모드|h_eff|a_v|hv|단열"
+  grep -E "^    \[OK\].*cas\.h5|^    \[!!\]" "$LOG"
+fi
 echo "=== 좌표 매칭 ==="
 sed -n '/face_seeds 좌표 매칭/,/face_seeds 목록/p' "$LOG" | grep -E "거리|임계값"
 echo "=== 오류 ==="
@@ -21,3 +27,4 @@ ls -lt --time-style=+%m-%d\ %H:%M *.msh.h5 "$LOG" 2>/dev/null | head -5
 for f in mesh.msh.h5 mesh_labeled.msh.h5; do
   [ -f "$f" ] || echo "  ⚠ $f 없음"
 done
+[ -f case.cas.h5 ] && ls -lh --time-style=+%m-%d\ %H:%M case.cas.h5

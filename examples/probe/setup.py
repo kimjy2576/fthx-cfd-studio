@@ -196,3 +196,13 @@ step("13. 파일 확인", _verify)
 print("=" * 60)
 print("SETUP 완료. 포러스 존 설정은 위 5단계 출력값을 확인할 것")
 print("=" * 60)
+
+# 솔버는 저널 끝에서 스스로 종료하지 않음. 명시적으로 나가야 LSF 작업이 끝남
+# (메싱은 "Halting due to end of file on input" 으로 자동 종료됨).
+try:
+    TUI().exit()
+except Exception:
+    try:
+        exit()
+    except Exception:
+        pass
