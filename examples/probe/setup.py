@@ -167,18 +167,23 @@ def _porous():
             print("    child_names: %s" % list(obj.child_names)[:40])
         except Exception:
             pass
-        try_all("porous %s" % n, [
-            ("set_state(porous_zone)", lambda o=obj: o.set_state({
-                "porous": True,
-                "porosity": {"value": POROSITY},
-                "viscous_resistance": {"direction_1": 1.0 / ALPHA,
-                                       "direction_2": 1.0 / ALPHA,
-                                       "direction_3": 1.0 / ALPHA},
-                "inertial_resistance": {"direction_1": C2,
-                                        "direction_2": C2,
-                                        "direction_3": C2},
-                "laminar": True})),
-            ("porous=True 만", lambda o=obj: o.set_state({"porous": True})),
+        # 실측 스키마: porous_zone = {'porous': False}, general = {'laminar': False}
+        try_all("porous 켜기 %s" % n, [
+            ("porous_zone.porous = True",
+             lambda o=obj: o.porous_zone.set_state({"porous": True})),
+        ])
+        # 켠 뒤 하위 키가 드러남 — 스키마를 다시 찍어 확정
+        try:
+            pz = obj.porous_zone.get_state()
+            print("    [스키마] porous_zone (켠 뒤):")
+            for k in sorted(pz):
+                print("      %-36s %s" % (k, str(pz[k])[:64]))
+            print("    child_names: %s" % list(obj.porous_zone.child_names)[:40])
+        except Exception as ex:
+            print("    porous_zone get_state 실패: %s" % ex)
+        try_all("Laminar Zone", [
+            ("general.laminar = True",
+             lambda o=obj: o.general.set_state({"laminar": True})),
         ])
     print("    → GUI 확인용")
     print("      Viscous Resistance 1/alpha = %.4e 1/m2" % (1.0 / ALPHA))
@@ -212,12 +217,25 @@ def _bc():
             print("    child_names: %s" % list(obj.child_names)[:40])
         except Exception:
             pass
-        try_all("공기 입구 %.2f m/s / %.1f K" % (V_FACE, T_AIR_IN), [
-            ("momentum+thermal", lambda o=obj: o.set_state({
-                "momentum": {"velocity_magnitude": {"value": V_FACE}},
-                "thermal": {"t": {"value": T_AIR_IN}}})),
-            ("flat", lambda o=obj: o.set_state({"velocity_magnitude": V_FACE,
-                                               "t": T_AIR_IN})),
+        # 실측 스키마: thermal = {'temperature': {'option':'value','value':300}}
+        try_all("공기 입구 온도 %.1f K" % T_AIR_IN, [
+            ("thermal.temperature.value",
+             lambda o=obj: o.thermal.set_state(
+                 {"temperature": {"option": "value", "value": T_AIR_IN}})),
+        ])
+        try:
+            mo = obj.momentum.get_state()
+            print("    [스키마] air_inlet.momentum:")
+            for k in sorted(mo):
+                print("      %-36s %s" % (k, str(mo[k])[:64]))
+        except Exception as ex:
+            print("    momentum get_state 실패: %s" % ex)
+        try_all("공기 입구 %.2f m/s" % V_FACE, [
+            ("momentum.velocity_magnitude",
+             lambda o=obj: o.momentum.set_state(
+                 {"velocity_magnitude": {"option": "value", "value": V_FACE}})),
+            ("momentum.velocity", lambda o=obj: o.momentum.set_state(
+                 {"velocity": {"option": "value", "value": V_FACE}})),
         ])
     else:
         print("    air_inlet 이 velocity_inlet 에 없음 — 5단계 타입 변경 확인")
@@ -228,11 +246,18 @@ def _bc():
             print("    [스키마] air_outlet: %s" % sorted(obj.get_state())[:20])
         except Exception:
             pass
-        try_all("공기 출구 0 Pa", [
-            ("momentum", lambda o=obj: o.set_state({
-                "momentum": {"gauge_pressure": {"value": 0.0}},
-                "thermal": {"t": {"value": T_AIR_IN}}})),
-            ("flat", lambda o=obj: o.set_state({"gauge_pressure": 0.0})),
+        try:
+            print("    [스키마] air_outlet.momentum: %s"
+                  % sorted(obj.momentum.get_state())[:16])
+        except Exception:
+            pass
+        try_all("공기 출구 0 Pa / %.1f K" % T_AIR_IN, [
+            ("momentum.gauge_pressure", lambda o=obj: o.momentum.set_state(
+                {"gauge_pressure": {"option": "value", "value": 0.0}})),
+        ])
+        try_all("출구 역류 온도", [
+            ("thermal.temperature", lambda o=obj: o.thermal.set_state(
+                {"temperature": {"option": "value", "value": T_AIR_IN}})),
         ])
 
     if "ref_inlet_c01" in list(bc.mass_flow_inlet):
@@ -241,10 +266,22 @@ def _bc():
             print("    [스키마] ref_inlet: %s" % sorted(obj.get_state())[:20])
         except Exception:
             pass
-        try_all("냉매 입구 %.5f kg/s / %.1f K" % (M_REF / N_CIRCUIT, T_REF), [
-            ("momentum+thermal", lambda o=obj: o.set_state({
-                "momentum": {"mass_flow_rate": {"value": M_REF / N_CIRCUIT}},
-                "thermal": {"t": {"value": T_REF}}})),
+        try:
+            print("    [스키마] ref_inlet.momentum: %s"
+                  % sorted(obj.momentum.get_state())[:16])
+        except Exception:
+            pass
+        try_all("냉매 입구 %.5f kg/s" % (M_REF / N_CIRCUIT), [
+            ("momentum.mass_flow_rate", lambda o=obj: o.momentum.set_state(
+                {"mass_flow_rate": {"option": "value",
+                                    "value": M_REF / N_CIRCUIT}})),
+            ("momentum.mass_flow", lambda o=obj: o.momentum.set_state(
+                {"mass_flow": {"option": "value",
+                               "value": M_REF / N_CIRCUIT}})),
+        ])
+        try_all("냉매 입구 온도 %.1f K" % T_REF, [
+            ("thermal.temperature", lambda o=obj: o.thermal.set_state(
+                {"temperature": {"option": "value", "value": T_REF}})),
         ])
 step("6b. 경계조건", _bc)
 
