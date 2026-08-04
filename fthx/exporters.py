@@ -946,9 +946,13 @@ def _thermal():
     named = getattr(getattr(S, "setup", None), "named_expressions", None)
     if named is not None:
         try_all("표현식 hx_source", [
-            ("named_expressions.create+set", lambda: (
-                named.create("hx_source"),
+            ("create(name=)+set", lambda: (
+                named.create(name="hx_source"),
                 named["hx_source"].set_state({{"definition": expr}}))[1]),
+            ("create(name=,definition=)", lambda: named.create(
+                name="hx_source", definition=expr)),
+            ("직접 대입", lambda: named.__setitem__(
+                "hx_source", {{"definition": expr}})),
         ])
         try:
             print("      정의: %s" % named["hx_source"].get_state())
@@ -970,12 +974,39 @@ def _thermal():
             print("    [스키마] %s.sources: %s" % (n, str(src.get_state())[:200]))
         except Exception:
             pass
-        try_all("에너지 소스 %s" % n, [
-            ("sources.energy = expression", lambda o=obj: o.sources.set_state({{
-                "energy": [{{"option": "expression",
-                            "expression": "hx_source"}}]}})),
-            ("sources.energy = value", lambda o=obj: o.sources.set_state({{
-                "energy": [{{"option": "value", "value": 0.0}}]}})),
+        # 실측 스키마: sources = {{'energy': {{'nsource': 0}}}}
+        # 리스트가 아니라 nsource 로 슬롯 수를 먼저 정하는 구조.
+        # 포러스가 porous=True 로 켠 뒤 저항 키가 드러난 것과 같은 패턴.
+        try_all("소스 슬롯 확보 %s" % n, [
+            ("energy.nsource = 1",
+             lambda o=obj: o.sources.set_state({{"energy": {{"nsource": 1}}}})),
+        ])
+        try:
+            st2 = obj.sources.get_state()
+            print("    [스키마2] sources(슬롯 확보 후): %s" % str(st2)[:400])
+            en = st2.get("energy")
+            if isinstance(en, dict):
+                print("      energy 키: %s" % sorted(en))
+        except Exception:
+            pass
+        try:
+            ec = obj.sources.energy
+            print("      energy 하위: %s"
+                  % [x for x in dir(ec) if not x.startswith("_")][:20])
+        except Exception:
+            pass
+        try_all("에너지 소스 값 %s" % n, [
+            ("energy.source_terms expression",
+             lambda o=obj: o.sources.set_state({{"energy": {{
+                 "nsource": 1,
+                 "source_terms": [{{"option": "expression",
+                                   "expression": "hx_source"}}]}}}})),
+            ("energy[0] = expression",
+             lambda o=obj: o.sources.energy.__setitem__(
+                 0, {{"option": "expression", "expression": "hx_source"}})),
+            ("energy.source_terms 단순",
+             lambda o=obj: o.sources.set_state({{"energy": {{
+                 "nsource": 1, "source_terms": ["hx_source"]}}}})),
         ])
         try:
             print("    [확인] %s" % str(obj.sources.get_state())[:220])

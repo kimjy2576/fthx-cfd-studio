@@ -9,8 +9,8 @@ grep -E "cells were created|Total Number of Cell Zones|Orthogonal Quality" "$LOG
 if grep -q "SETUP 완료" "$LOG" 2>/dev/null; then
   echo "=== SETUP (M3) ==="
   sed -n '/5. 포러스 계수/,/<<</p' "$LOG" | grep -E "porosity|Viscous|Inertial|Porosity|Laminar|Relative"
-  sed -n '/7. 열 모델/,/<<< OK   7/p' "$LOG" \
-    | grep -E "모드|hv =|정의:|\[OK\]|\[--\]|\[확인\]|\[스키마\]" | head -10
+  awk '/^>>> 7\. 열 모델/,/^<<< (OK|FAIL) +7\./' "$LOG" \
+    | grep -E "모드|hv =|정의:|\[OK\]|\[--\]|\[확인\]|\[스키마|energy" | head -20
   if grep -q "12. 반복" "$LOG" 2>/dev/null; then
     echo "--- 수렴 (M4) ---"
     echo "  residual (마지막 5줄):"
