@@ -20,11 +20,13 @@ if grep -q "SETUP 완료" "$LOG" 2>/dev/null; then
     echo "  리포트 API (다음 라운드 확정용):"
     sed -n '/11. 리포트 정의/,/<<< OK   11/p' "$LOG" | grep -E "하위:|\[--\]|\[OK\]|스키마" | head -8
   fi
-  if [ -f results.csv ]; then
-    echo "--- 결과 (M5) ---"
-    cat results.csv
-    echo "  → 성능 지표:  python scripts/post.py examples/<case>/results.csv --preset <case>"
-  fi
+  echo "--- 성능 지표 (M5) ---"
+  ROOT=$(cd "$(dirname "$0")/.." && pwd)
+  if [ -f results.csv ]; then cat results.csv; fi
+  # pydantic 없이 도는 버전 — Fluent 서버에 pip 이 없어도 됨
+  python "$ROOT/scripts/post_standalone.py" . 2>/dev/null \
+    || python3 "$ROOT/scripts/post_standalone.py" . 2>/dev/null \
+    || echo "  (지표 계산 실패 — results.csv 나 case.json 확인)"
   echo "--- 포러스 최종 상태 ---"
   grep -E "^    \[최종\]|^           " "$LOG" | head -8
   echo "--- API 스키마 ---"

@@ -74,7 +74,17 @@ FTHX_ITER=200 fluent 3ddp -g -t8 -i setup.py
 > 코어 수는 **코어당 2~5만 셀** 이 적정. probe(285k)는 8~32 코어가 맞고,
 > 128 코어는 통신이 계산을 압도해 오히려 느려짐.
 
-## 6) 판정
+## 6) 성능 지표
+
+```bash
+python scripts/post_standalone.py examples/<case>
+```
+
+`results.csv` + `case.json` + `closure.json` 만 읽어 dP·Q·LMTD·UA·NTU 를 계산함.
+**표준 라이브러리만 쓰므로 pip 이 없는 서버에서도 동작**함.
+`check.sh` 가 자동으로 호출하므로 따로 칠 필요는 없음.
+
+## 7) 판정
 
 | 항목 | 기대값 |
 |---|---|
