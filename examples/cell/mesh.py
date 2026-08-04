@@ -285,8 +285,10 @@ def _try_all(label, trials):
     for name, fn in trials:
         try:
             out = fn()
-            if out is False:          # run_menu 는 실패 시 False 를 반환함
-                print("    [--] " + name + " -> False (명령 실패)")
+            if out is False or out is None:
+                # 실측: convert_zone_ids_to_name_strings 가 None 을 반환하는데
+                # [OK] 로 찍혀 이름 없는 _ROWS 가 만들어졌음
+                print("    [--] " + name + " -> " + str(out) + " (값 없음)")
                 continue
             print("    [OK] " + name + " -> " + str(out)[:300])
             return name, out
@@ -295,13 +297,27 @@ def _try_all(label, trials):
     return None, None
 
 def zone_names(ids):
+    """존 id -> 이름. 실측: convert_zone_ids_to_name_strings 가 None 을 반환함.
+       이름을 못 얻으면 분리도 매칭도 불가하므로 여러 경로를 시도한다."""
+    mu = _MU()
     nm, out = _try_all("존 id -> 이름", [
-        ("convert_zone_ids_to_name_strings(zone_id_list=ids)",
-         lambda: MU.convert_zone_ids_to_name_strings(zone_id_list=ids)),
-        ("convert_zone_ids_to_name_strings(zone_ids=ids)",
-         lambda: MU.convert_zone_ids_to_name_strings(zone_ids=ids)),
+        ("convert_zone_ids_to_name_strings(zone_id_list=)",
+         lambda: mu.convert_zone_ids_to_name_strings(zone_id_list=list(ids))),
+        ("convert_zone_ids_to_name_strings(위치인자)",
+         lambda: mu.convert_zone_ids_to_name_strings(list(ids))),
+        ("get_face_zones(filter=*) 를 이름으로",
+         lambda: mu.get_face_zones(filter="*")),
+        ("get_zones(filter=*)", lambda: mu.get_zones(filter="*")),
+        ("scheme zone-name", lambda: [
+            TUI_EXEC("(zone-name %d)" % i) for i in list(ids)[:3]]),
     ])
-    return out or []
+    if not out:
+        # 마지막 수단 — id 만으로도 좌표 매칭은 가능함
+        print("    이름을 못 얻음 — id 기반으로 진행")
+        return []
+    if isinstance(out, (list, tuple)) and out and isinstance(out[0], str):
+        return list(out)
+    return []
 
 def zone_table():
     """면 존별 id · 이름 · 대표좌표 · 면적. 라벨링의 기초 자료."""
@@ -318,7 +334,7 @@ def zone_table():
         except Exception:
             a = None
         rows.append({"id": zid,
-                     "name": names[i] if i < len(names) else "?",
+                     "name": names[i] if i < len(names) else None,
                      "c": c, "area": a})
     return rows
 
@@ -370,17 +386,38 @@ def _sep_api():
     # 실측 시그니처: face_zone_name_list + seed_points (복수형, list of lists)
     print("    대상 존을 seed 로 분리")
     rows = globals().get("_ROWS") or []
-    targets = [r for r in rows if r["name"] and "fluid_cell" in str(r["name"])
-               and "-solid-" not in str(r["name"])]
-    print("      대상: %s" % [r["name"] for r in targets])
+    # 이름을 못 얻는 경우가 있으므로 좌표로도 고를 수 있게 함.
+    # 입출구 seed 에 가장 가까운 존이 곧 그 면을 품고 있는 존임.
+    def pick(sd):
+        best, bd = None, 1e18
+        for r in rows:
+            c = r.get("c")
+            if not c:
+                continue
+            d = sum((c[i] - sd[i]) ** 2 for i in range(3)) ** 0.5
+            if d < bd:
+                best, bd = r, d
+        return best, bd
+    named = [r for r in rows if r.get("name") and "fluid_cell" in str(r["name"])
+             and "-solid-" not in str(r["name"])]
+    print("      이름으로 고른 대상: %s" % [r["name"] for r in named])
+    print("      전체 존 %d개 (이름 있는 것 %d개)"
+          % (len(rows), sum(1 for r in rows if r.get("name"))))
     for key in ("cell_inlet", "cell_outlet"):
         sd = FACE_SEEDS.get(key)
         if not sd:
             continue
-        for r in targets:
-            zn = r["name"]
+        cand = named or [pick(sd)[0]] if rows else []
+        cand = [c for c in cand if c]
+        for r in cand:
+            zn = r.get("name")
+            if not zn:
+                print("      %s: 이름 없음 — id %s 로 시도" % (key, r["id"]))
             got, _ = try_all("%s <- %s seed %s"
                              % (key, zn, [round(v, 2) for v in sd]), [
+                ("id_list + seed_points",
+                 lambda r=r, sd=sd: mu.separate_face_zones_by_seed(
+                     face_zone_id_list=[r["id"]], seed_points=[list(sd)])),
                 ("name_list + seed_points",
                  lambda zn=zn, sd=sd: mu.separate_face_zones_by_seed(
                      face_zone_name_list=[zn], seed_points=[list(sd)])),
