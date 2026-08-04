@@ -20,6 +20,11 @@ if grep -q "SETUP 완료" "$LOG" 2>/dev/null; then
     echo "  리포트 API (다음 라운드 확정용):"
     sed -n '/11. 리포트 정의/,/<<< OK   11/p' "$LOG" | grep -E "하위:|\[--\]|\[OK\]|스키마" | head -8
   fi
+  if [ -f results.csv ]; then
+    echo "--- 결과 (M5) ---"
+    cat results.csv
+    echo "  → 성능 지표:  python scripts/post.py examples/<case>/results.csv --preset <case>"
+  fi
   echo "--- 포러스 최종 상태 ---"
   grep -E "^    \[최종\]|^           " "$LOG" | head -8
   echo "--- API 스키마 ---"

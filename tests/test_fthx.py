@@ -1087,3 +1087,60 @@ def test_solver_journal_is_valid_python():
     assert "superficial" in j                  # 좌표계 경고
     assert "Laminar Zone" in j                 # 포러스 내 가짜 난류 방지
     assert "air_inlet" in j and "air_outlet" in j
+
+
+# ─────────────────── M5: 후처리 ───────────────────
+@pytest.fixture
+def cfd_raw():
+    """500회 수렴 실측값 (probe, 32core)"""
+    return {"p_air_in": 4.1519, "p_air_out": -0.0032, "t_air_out": 297.53}
+
+
+def test_metrics_lmtd_and_ntu_agree(cfd_raw):
+    """LMTD 와 eps-NTU 로 구한 UA 가 일치해야 함 (자기정합성)"""
+    from fthx import presets, post
+    m = post.metrics(presets.probe(), cfd_raw)
+    assert m["UA_W_K"] == pytest.approx(m["UA_from_NTU_W_K"], rel=1e-9)
+    assert m["dP_air_Pa"] == pytest.approx(4.1551, abs=1e-3)
+    assert m["Q_W"] > 0
+    assert 0 < m["effectiveness"] < 1
+
+
+def test_metrics_energy_balance(cfd_raw):
+    """Q = m*cp*dT 가 성립하는지"""
+    from fthx import presets, post
+    p = presets.probe()
+    m = post.metrics(p, cfd_raw)
+    dT = m["T_air_in_K"] - m["T_air_out_K"]
+    assert m["Q_W"] == pytest.approx(m["m_air_kgs"] * m["cp"] * dT, rel=1e-9)
+
+
+def test_prediction_comparison(cfd_raw):
+    from fthx import presets, post
+    m = post.metrics(presets.probe(), cfd_raw)
+    c = post.compare_prediction(presets.probe(), m)
+    dp = next(r for r in c["rows"] if r["quantity"] == "dP_air_Pa")
+    assert abs(dp["error_pct"]) < 5.0        # closure 예측과 5% 이내
+    ua = next(r for r in c["rows"] if r["quantity"] == "UA_W_K")
+    assert ua["cfd"] < ua["predicted"]       # 공기측 예측이 상한
+
+
+def test_post_row_and_csv_roundtrip(cfd_raw, tmp_path):
+    import csv
+    from fthx import presets, post
+    p = presets.probe()
+    row = post.to_row(p, post.metrics(p, cfd_raw))
+    assert row["case"] == p.name and "dP_air_Pa" in row and "UA_W_K" in row
+    f = tmp_path / "r.csv"
+    f.write_text("case,p_air_in,p_air_out,t_air_out\n"
+                 "x,4.1519,-0.0032,297.53\n", encoding="utf-8")
+    back = post.read_csv(str(f))
+    assert back["p_air_in"] == pytest.approx(4.1519)
+
+
+def test_journal_writes_results_csv():
+    from fthx import presets, exporters
+    j = exporters.solver_journal(presets.probe())
+    assert "results.csv" in j
+    assert 'CASE_NAME = "probe_small"' in j
+    assert "14. results.csv" in j

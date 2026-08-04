@@ -34,6 +34,7 @@ HV        = 68825.64   # W/m3K
 V_FACE    = 2.0               # m/s
 D_H_AIR   = 0.002299   # m, 공기측 수력직경
 DP_PRED   = 4.1574        # Pa, closure 가 예측한 코어 압력강하
+CASE_NAME = "tutorial_1tube"
 T_AIR_IN  = 300.15    # K
 T_REF     = 280.15  # K
 M_REF     = 0.03              # kg/s (전체)
@@ -470,9 +471,72 @@ if ITER > 0:
     print("    ── 대조 ──")
     print("    closure 예측 코어 dP = %.3f Pa" % DP_PRED)
     print("    (위 입구압력 - 출구압력 과 비교. 오차가 크면 포러스 계수 확인)")
-    step("13. 수렴 물리량", _converged)
 
-    step("14. 데이터 저장",
+def _results_csv():
+    """면적분 값을 CSV 로 직접 씀. 로그 파싱은 형식이 바뀌면 깨지므로 안 함.
+       Fluent 의 surface_integrals 는 값을 파일로 저장할 수 있음."""
+    t = TUI()
+    si = t.report.surface_integrals
+    tmp = os.path.join(_HERE, "_si.txt")
+    specs = [
+        ("p_air_in",  "area_weighted_avg", ["air_inlet"],  "pressure"),
+        ("p_air_out", "area_weighted_avg", ["air_outlet"], "pressure"),
+        ("t_air_out", "mass_weighted_avg", ["air_outlet"], "temperature"),
+        ("t_ref_out", "mass_weighted_avg", ["ref_outlet_c01"], "temperature"),
+    ]
+    vals = {}
+    for key, fn_name, surfs, field in specs:
+        fn = getattr(si, fn_name, None)
+        if fn is None:
+            print("    [--] %s (%s 없음)" % (key, fn_name))
+            continue
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        ok = False
+        for args in ((surfs[0], "()", field, "yes", tmp, "yes"),
+                     (surfs[0], "()", field, "yes", tmp)):
+            try:
+                fn(*args)
+                ok = True
+                break
+            except Exception as ex:
+                last = "%s: %s" % (type(ex).__name__, str(ex)[:80])
+        if not ok:
+            print("    [--] %s 파일저장 실패 (%s)" % (key, last))
+            continue
+        try:
+            with open(tmp) as f:
+                txt = f.read()
+            num = None
+            for line in txt.splitlines():
+                parts = line.split()
+                for tok in parts[::-1]:
+                    try:
+                        num = float(tok)
+                        break
+                    except ValueError:
+                        continue
+                if num is not None:
+                    break
+            vals[key] = num
+            print("    %-12s %s" % (key, num))
+        except Exception as ex:
+            print("    [--] %s 파싱 실패: %s" % (key, ex))
+
+    out = os.path.join(_HERE, "results.csv")
+    cols = ["case", "p_air_in", "p_air_out", "t_air_out", "t_ref_out"]
+    with open(out, "w") as f:
+        f.write(",".join(cols) + chr(10))
+        f.write(",".join([CASE_NAME] + [
+            ("" if vals.get(c) is None else "%.6g" % vals[c])
+            for c in cols[1:]]) + chr(10))
+    print("    [OK] results.csv 저장: %s" % out)
+    for c in cols[1:]:
+        print("      %-12s %s" % (c, vals.get(c)))
+    step("13. 수렴 물리량", _converged)
+    step("14. results.csv", _results_csv)
+
+    step("15. 데이터 저장",
          lambda: TUI().file.write_data(CASE_OUT.replace(".cas", ".dat")))
 
 def _verify():
@@ -481,6 +545,7 @@ def _verify():
     files = [MESH_IN, CASE_OUT]
     if ITER > 0:
         files.append(CASE_OUT.replace(".cas", ".dat"))
+        files.append(os.path.join(_HERE, "results.csv"))
     for f in files:
         if os.path.exists(f):
             st = os.stat(f)
@@ -489,7 +554,7 @@ def _verify():
                 time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime))))
         else:
             print("    [!!] %-28s 없음" % os.path.basename(f))
-step("15. 파일 확인", _verify)
+step("16. 파일 확인", _verify)
 
 print("=" * 60)
 print("SETUP 완료. 포러스 존 설정은 위 5단계 출력값을 확인할 것")
