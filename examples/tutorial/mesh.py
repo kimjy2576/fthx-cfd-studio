@@ -85,10 +85,72 @@ def TUI():
 step("InitializeWorkflow",
      lambda: workflow.InitializeWorkflow(WorkflowType="Watertight Geometry"))
 
+def _probe_import_api():
+    """임포트·존분리 API 를 통째로 덤프. 추측을 멈추고 실제를 본다.
+
+    실측: run_menu 는 메싱에도 없음(NameError). meshing_utilities 는 있음.
+    """
+    g = globals()
+    print("    --- globals (전체) ---")
+    ns = sorted(k for k in g if not k.startswith("_"))
+    for i in range(0, len(ns), 6):
+        print("      " + ", ".join(ns[i:i + 6]))
+
+    print("    --- TUI 문자열 실행 후보 ---")
+    LIST = "/boundary/manage/list"
+    for label, fn in (
+            ("meshing.tui(LIST)", lambda: g["meshing"].tui(LIST)),
+            ("meshing.execute_tui(LIST)",
+             lambda: g["meshing"].execute_tui(LIST)),
+            ("meshing.scheme_eval", lambda: g["meshing"].scheme_eval.scheme_eval(
+                "(ti-menu-load-string " + chr(34) + LIST + chr(34) + ")")),
+            ("PyTUI", lambda: g["PyTUI"]),
+            ("flapi dir", lambda: [x for x in dir(g["flapi"])
+                                   if not x.startswith("_")][:20]),
+            ("cx dir", lambda: [x for x in dir(g["cx"])
+                                if not x.startswith("_")][:20]),
+    ):
+        try:
+            print("      [OK] %-28s %s" % (label, str(fn())[:200]))
+        except Exception as ex:
+            print("      [--] %-28s %s: %s"
+                  % (label, type(ex).__name__, str(ex)[:80]))
+
+    print("    --- tui.file.import_ 하위 ---")
+    try:
+        imp = TUI().file.import_
+        print("      " + ", ".join(x for x in dir(imp)
+                                    if not x.startswith("_"))[:400])
+    except Exception as ex:
+        print("      실패: %s" % ex)
+
+    print("    --- 존 분리 관련 (meshing_utilities) ---")
+    mu = g.get("meshing_utilities")
+    if mu is not None:
+        hits = [x for x in dir(mu) if not x.startswith("_")
+                and any(k in x.lower() for k in
+                        ("separate", "split", "merge", "rename", "create",
+                         "label", "mark"))]
+        for i in range(0, len(hits), 3):
+            print("      " + ", ".join(hits[i:i + 3]))
+step("0. 임포트/분리 API 탐색", _probe_import_api)
+
 def _import():
+    """면 단위 존 생성 시도. 실패해도 바디 단위로 진행함."""
     t = task("Import Geometry")
-    set_args(t, {"FileName": STEP, "LengthUnit": "mm", "AppendMesh": False})
-    t.Execute()
+    base = {"FileName": STEP, "LengthUnit": "mm", "AppendMesh": False}
+    got, _ = try_all("임포트", [
+        ("CreateObjectPer=Face", lambda: (
+            set_args(t, dict(base, CreateObjectPer="Face")), t.Execute())[1]),
+        ("OneZonePer=Face", lambda: (
+            set_args(t, dict(base, OneZonePer="Face")), t.Execute())[1]),
+        ("바디 단위", lambda: (set_args(t, base), t.Execute())[1]),
+    ])
+    print("    임포트 방식: %s" % got)
+    try:
+        print("    Arguments: %s" % t.Arguments.get_state())
+    except Exception as ex:
+        print("    Arguments 조회 실패: %s" % ex)
 step("1. Import Geometry", _import)
 
 step("2. Add Local Sizing (건너뜀)",
@@ -204,7 +266,17 @@ FACE_SEEDS = {"air_inlet": [-40.0, 12.7, 50.0], "air_outlet": [102.0, 12.7, 50.0
 #  걸림돌: Import Geometry 에 면 단위 존 옵션이 없어 존이 바디 단위로 묶임.
 #         → 각도로 분리한 뒤 좌표 매칭.
 # ══════════════════════════════════════════════════════════════
-MU = globals().get("meshing_utilities")
+def _MU():
+    """모듈 로드 시점이 아니라 호출 시점에 찾음.
+       (실측: 0단계에서는 있던 이름이 12b 에서 NameError 가 났음)"""
+    g = globals()
+    for nm in ("meshing_utilities", "meshing_utilities_app"):
+        o = g.get(nm)
+        if o is not None:
+            return o
+    return None
+
+MU = _MU()
 
 def _try_all(label, trials):
     print("  == " + label)
@@ -260,6 +332,91 @@ def _dump_zones():
               (r["id"], str(r["name"])[:46], cs,
                ("%.1f" % r["area"]) if r["area"] else "?"))
 step("12. 면 존 표 (id/이름/좌표/면적)", _dump_zones)
+
+def TUI_EXEC(cmd):
+    """TUI 문자열 실행. 0단계에서 meshing.execute_tui 가 [OK] 였으나
+       12b 에서 NameError 가 났음 — 후보를 넓혀 다시 찾음."""
+    g = globals()
+    last = None
+    for nm in ("meshing", "meshing_app", "session", "solver", "root"):
+        o = g.get(nm)
+        if o is None:
+            continue
+        for attr in ("execute_tui", "exec_tui", "tui_exec"):
+            fn = getattr(o, attr, None)
+            if fn is not None:
+                try:
+                    return fn(cmd)
+                except Exception as ex:
+                    last = "%s.%s: %s" % (nm, attr, ex)
+    raise NameError("execute_tui 경로 없음 (%s) · globals: %s"
+                    % (last, ", ".join(sorted(k for k in g
+                                              if "mesh" in k.lower()))))
+
+def _sep_api():
+    """seed 좌표로 존을 쪼갬. 시그니처를 먼저 캐낸 뒤 호출한다.
+
+    실측: separate_face_zones_by_seed() 는 존재하나
+          seed_point 라는 인자명은 없음 (unexpected keyword argument).
+    """
+    mu = _MU()
+    if mu is None:
+        print("    meshing_utilities 없음")
+        return
+    globals()["MU"] = mu
+    fn = getattr(mu, "separate_face_zones_by_seed", None)
+    print("    --- separate_face_zones_by_seed 시그니처 ---")
+    for label, get in (
+            ("__doc__", lambda: fn.__doc__),
+            ("inspect.signature", lambda: __import__("inspect").signature(fn)),
+            ("__wrapped__ doc", lambda: fn.__wrapped__.__doc__),
+            ("dir", lambda: [x for x in dir(fn) if not x.startswith("_")]),
+    ):
+        try:
+            print("      %-20s %s" % (label, str(get())[:600]))
+        except Exception as ex:
+            print("      %-20s !! %s" % (label, str(ex)[:80]))
+    # 인자명 없이 호출해 오류 메시지에서 필수 인자를 얻음
+    try:
+        fn()
+    except Exception as ex:
+        print("      무인자 호출 -> %s: %s" % (type(ex).__name__, str(ex)[:300]))
+
+    print("    --- TUI 경로 확인 ---")
+    try:
+        print("      %s" % str(TUI_EXEC("/boundary/manage/list"))[:200])
+    except Exception as ex:
+        print("      !! %s" % str(ex)[:300])
+
+    rows = globals().get("_ROWS") or []
+    targets = [r for r in rows if r["name"] and "fluid_cell" in str(r["name"])
+               and "-solid-" not in str(r["name"])]
+    print("    대상 존: %s" % [r["name"] for r in targets])
+    for key in ("cell_inlet", "cell_outlet"):
+        sd = FACE_SEEDS.get(key)
+        if not sd or not targets:
+            continue
+        x, y, z = sd
+        for r in targets:
+            zn = r["name"]
+            got, _ = try_all("%s <- %s" % (key, zn), [
+                ("seed=[x,y,z]", lambda zn=zn: mu.separate_face_zones_by_seed(
+                    face_zone_name_list=[zn], seed=[x, y, z])),
+                ("point=[x,y,z]", lambda zn=zn: mu.separate_face_zones_by_seed(
+                    face_zone_name_list=[zn], point=[x, y, z])),
+                ("위치인자", lambda zn=zn: mu.separate_face_zones_by_seed(
+                    [zn], [x, y, z])),
+                ("execute_tui by-seed", lambda zn=zn: TUI_EXEC(
+                    "/boundary/separate/sep-face-zone-by-seed %s %g %g %g 40 ()"
+                    % (zn, x, y, z))),
+            ])
+            if got:
+                break
+    try:
+        print("    분리 후 면 존 %d개" % len(mu.get_face_zones(filter="*")))
+    except Exception as ex:
+        print("    존 재조회 실패: %s" % ex)
+step("12b. seed 기반 존 분리", _sep_api)
 
 # 각도 분리 단계는 제거함.
 # 케이싱 솔리드가 있으면 상·하류 박스의 자유면이 입구/출구만 남아
