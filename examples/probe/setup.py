@@ -328,19 +328,62 @@ def _bc():
         ])
 step("6b. 경계조건", _bc)
 
-# ── 7. 열 모델 안내 ────────────────────────────────────────
+# ── 7. 열 모델 — 체적 열원 ─────────────────────────────────
+# equilibrium: 포러스 코어에 q_vol = hv * (T_ref - T) 를 부과.
+#   hv = eta_o * h * a_v  [W/m3K]
+#   냉매 등온 가정 — 단상이고 관내 온도변화가 작을 때 성립.
+#   관벽 conduction 만으로는 핀 전열이 빠져 UA 가 절반으로 나옴
+#   (실측: 열원 없이 UA 2.03 W/K, 예측 전체 UA 4.03 W/K)
 def _thermal():
     print("    모드: " + THERMAL)
-    if THERMAL == "equilibrium":
-        print("    단일 온도 포러스 + 체적 열원")
-        print("      h_eff = %.2f W/m2K (핀효율 반영)" % H_EFF)
-        print("      a_v   = %.1f 1/m" % A_V)
-        print("      hv    = %.1f W/m3K  → 에너지 소스: hv*(T_wall - T)" % HV)
-    elif THERMAL == "netm":
-        print("    2온도(NETM) — 고체상↔관벽 접합 미검증. equilibrium 권장")
-    else:
+    if THERMAL == "none":
         print("    단열 — 압력강하만")
-step("7. 열 모델", _thermal)
+        return
+    if THERMAL == "netm":
+        print("    2온도(NETM) — 고체상↔관벽 접합 미검증. equilibrium 권장")
+        return
+    print("    hv = eta_o*h*a_v = %.1f W/m3K,  T_ref = %.2f K" % (HV, T_REF))
+    S = SETTINGS()
+    expr = "%.6g [W m^-3 K^-1] * (%.6g [K] - StaticTemperature)" % (HV, T_REF)
+    named = getattr(getattr(S, "setup", None), "named_expressions", None)
+    if named is not None:
+        try_all("표현식 hx_source", [
+            ("named_expressions.create+set", lambda: (
+                named.create("hx_source"),
+                named["hx_source"].set_state({"definition": expr}))[1]),
+        ])
+        try:
+            print("      정의: %s" % named["hx_source"].get_state())
+        except Exception:
+            pass
+    else:
+        print("    named_expressions 없음")
+    czc = S.setup.cell_zone_conditions
+    fl = czc.fluid
+    cores = [n for n in list(fl) if "air_core" in n]
+    for n in cores:
+        obj = fl[n]
+        src = getattr(obj, "sources", None)
+        if src is None:
+            print("    [--] %s .sources 없음 — 속성: %s" % (
+                n, [x for x in dir(obj) if not x.startswith("_")][:20]))
+            continue
+        try:
+            print("    [스키마] %s.sources: %s" % (n, str(src.get_state())[:200]))
+        except Exception:
+            pass
+        try_all("에너지 소스 %s" % n, [
+            ("sources.energy = expression", lambda o=obj: o.sources.set_state({
+                "energy": [{"option": "expression",
+                            "expression": "hx_source"}]})),
+            ("sources.energy = value", lambda o=obj: o.sources.set_state({
+                "energy": [{"option": "value", "value": 0.0}]})),
+        ])
+        try:
+            print("    [확인] %s" % str(obj.sources.get_state())[:220])
+        except Exception:
+            pass
+step("7. 열 모델 (체적 열원)", _thermal)
 
 # ── 8. 솔버 설정 ───────────────────────────────────────────
 def _solver():

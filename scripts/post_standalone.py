@@ -113,10 +113,25 @@ def main():
                 ntu = -math.log(1 - eps)
                 rows += [("NTU", ntu), ("UA_from_NTU_W_K", ntu * m_air * cp)]
         fin = clos.get("fin") or {}
+        ref = clos.get("ref") or {}
+        tube = (case.get("params") or {}).get("tube") or case.get("tube") or {}
         if fin.get("h_eff_W_m2K") and der.get("A_o_mm2"):
-            ua_pred = fin["h_eff_W_m2K"] * der["A_o_mm2"] / 1e6
-            rows.append(("  UA 예측(공기측만)", ua_pred))
-            rows.append(("  → CFD 가 더 작아야 정상", 0.0))
+            A_o = der["A_o_mm2"] / 1e6
+            R_air = 1.0 / (fin["h_eff_W_m2K"] * A_o)
+            rows.append(("  UA 예측(공기측만)", 1.0 / R_air))
+            # 관벽·냉매측 저항까지 포함한 전체 UA
+            Di = tube.get("Di", 0) / 1e3
+            Do = tube.get("Do", 0) / 1e3
+            L = tube.get("L", 0) / 1e3
+            n = tube.get("Nr", 0) * tube.get("Nt", 0)
+            if Di and n and ref.get("Re"):
+                Nu = 0.023 * ref["Re"] ** 0.8      # Dittus-Boelter, Pr~1
+                h_r = Nu * 0.013 / Di              # k_R410A 증기 ~0.013 W/mK
+                A_i = n * math.pi * Di * L
+                R_ref = 1.0 / (h_r * A_i)
+                R_w = math.log(Do / Di) / (2 * math.pi * tube.get("k_tube", 386)
+                                           * n * L) if Do > Di else 0.0
+                rows.append(("  UA 예측(전체)", 1.0 / (R_air + R_w + R_ref)))
 
     for k, v in rows:
         print("  %-26s %14.4f" % (k, v))
