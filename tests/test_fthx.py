@@ -1198,3 +1198,36 @@ def test_cell_export(p, tmp_path):
     assert m["mode"] == "periodic_cell"
     assert set(m["face_seeds"]) == {"cell_inlet", "cell_outlet",
                                     "sym_y0", "sym_y1", "sym_z1"}
+
+
+def test_cell_sizing_is_anisotropic(p):
+    """z 가 0.9mm 로 얇아 등방 셀이면 낭비. 종횡비가 1보다 커야 함"""
+    from fthx import cell
+    s = cell.cell_sizing(p)
+    assert s["aspect_ratio"] > 1.5
+    assert s["hz_gap_mm"] < s["h_xy_mm"]
+    assert s["cells_est"] < 2e6
+
+
+def test_cell_flow_is_laminar(p):
+    """Re_Dh ~ 500 — 난류 모델을 켜면 h 가 과대평가됨"""
+    from fthx import cell
+    fl = cell.cell_flow(p)
+    assert fl["Re_Dh"] < 2300
+    assert fl["regime"] == "laminar"
+    assert fl["T_wall_K"] < fl["T_in_K"]
+
+
+def test_cell_journals_valid():
+    import ast
+    from fthx import presets, exporters, cell
+    p = presets.cell()
+    seeds = cell.build(p)[1]["face_seeds"]
+    jm = exporters.cell_mesh_journal(p, n_bodies=6, face_seeds=seeds)
+    js = exporters.cell_journal(p, area_m2=0.00051)
+    ast.parse(jm)
+    ast.parse(js)
+    assert "단일셀" in jm
+    assert "LAMINAR  = True" in js
+    assert "symmetry" in js          # 대칭면 타입 변경
+    assert "cell_results.csv" in js

@@ -55,4 +55,17 @@ def probe() -> FTHXParams:
     )
 
 
-PRESETS = {"tutorial": tutorial, "probe": probe}
+def cell() -> FTHXParams:
+    """주기 단위셀용 — 2열이면 staggered 패턴이 한 번 반복돼 충분함.
+       열을 늘리면 셀만 커지고 j·f 는 거의 같음(입구 효과 제외)."""
+    return FTHXParams(
+        name="cell_plain",
+        tube=TubeSpec(Do=9.52, Di=8.22, L=100, Nr=2, Nt=1,
+                      Pt=25.4, Pl=22.0, layout="staggered"),
+        fin=FinSpec(FPI=14, t_f=0.115, fin_type="plain"),
+        domain=DomainSpec(include_bends=False, include_tube_fluid=False),
+        export={"write_pcurves": False},
+    )
+
+
+PRESETS = {"tutorial": tutorial, "probe": probe, "cell": cell}

@@ -182,3 +182,107 @@ def export(p: FTHXParams, outdir: str = "out", **kw) -> dict:
         json.dump(meta, fp, indent=2, ensure_ascii=False)
     meta["_files"] = {"step": step, "json": js}
     return meta
+
+
+# ══════════════════════════════════════════════════════════════════
+#  메시 사이징 · 운전 조건
+# ══════════════════════════════════════════════════════════════════
+def cell_sizing(p: FTHXParams, h_xy: float = 0.25,
+                nz_gap: int = 10, nz_fin: int = 2) -> dict:
+    """단일셀 메시. z 가 0.9mm 로 얇아 이방성이 필요함.
+
+    y+ 는 1 근처이고 Re_Dh ~ 500 (층류) 이므로 벽함수를 쓰지 않음.
+    """
+    g = cell_geometry(p)
+    hz_gap = g["gap_half"] / nz_gap
+    hz_fin = g["t_f_half"] / nz_fin
+    n_air = (g["Lx"] / h_xy) * (g["Ly"] / h_xy) * nz_gap
+    n_fin = ((g["x_core"][1] - g["x_core"][0]) / h_xy) * (g["Ly"] / h_xy) * nz_fin
+    return {
+        "h_xy_mm": h_xy, "nz_gap": nz_gap, "nz_fin": nz_fin,
+        "hz_gap_mm": hz_gap, "hz_fin_mm": hz_fin,
+        "aspect_ratio": h_xy / hz_gap,
+        "cells_est": n_air + n_fin,
+        "note": "z 방향 스윕. 등방 tet 이면 셀이 수십 배로 늘어남",
+    }
+
+
+def cell_flow(p: FTHXParams) -> dict:
+    """단일셀 유동 조건. 풀사이즈와 같은 최대유속(G_max)을 재현해야
+       추출한 j·f 가 그대로 적용됨."""
+    o = p.operating_derived()["air"]
+    d = p.derived()
+    Dh = d["D_h_mm"] / 1000.0
+    Re = o["Re_Dh"]
+    return {
+        "V_face_ms": p.operating.air.V_face,
+        "u_max_ms": o["u_max_ms"],
+        "G_max": o["G_max"],
+        "Re_Dh": Re, "Re_Dc": o["Re_Dc"],
+        "D_h_m": Dh,
+        "regime": "laminar" if Re < 2300 else "turbulent",
+        "T_in_K": p.operating.air.T_in + 273.15,
+        "T_wall_K": p.operating.ref.T_sat_in + 273.15,
+        "rho": o["rho"], "mu": o["mu"], "cp": o["cp"],
+        "note": ("Re_Dh < 2300 이면 층류로 풀 것. 난류 모델을 켜면 "
+                 "가짜 난류점성으로 h 가 과대평가됨"),
+    }
+
+
+def extract_jf(p: FTHXParams, dp_Pa: float, q_W: float,
+               t_out_K: float, area_m2: Optional[float] = None) -> dict:
+    """단일셀 CFD 결과 → j, f.
+
+    dp_Pa   코어 압력강하 (입구면 - 출구면)
+    q_W     셀이 흡수한 열량 (벽면 열유속 적분 또는 공기 엔탈피 변화)
+    t_out_K 공기 출구 온도
+    """
+    fl = cell_flow(p)
+    d = p.derived()
+    g = cell_geometry(p)
+    rho, cp, mu = fl["rho"], fl["cp"], fl["mu"]
+    G = fl["G_max"]
+    T_in, T_w = fl["T_in_K"], fl["T_wall_K"]
+
+    # f — Kays&London 정의 (최소유동면적 기준)
+    A_o_A_c = d["A_o_over_A_c"]
+    f = dp_Pa * 2.0 * rho / (G ** 2 * A_o_A_c) if A_o_A_c else None
+
+    # j — 대수평균온도차로 h 산출 후 Colburn
+    dT1, dT2 = T_in - T_w, t_out_K - T_w
+    lmtd = ((dT1 - dT2) / math.log(dT1 / dT2)
+            if dT1 > 0 and dT2 > 0 and abs(dT1 - dT2) > 1e-9 else None)
+    A = area_m2
+    h = q_W / (A * lmtd) if (A and lmtd) else None
+    Pr = cp * mu / 0.0263
+    j = h / (G * cp) * Pr ** (2.0 / 3.0) if h else None
+
+    return {"dp_Pa": dp_Pa, "q_W": q_W, "T_out_K": t_out_K,
+            "LMTD_K": lmtd, "A_m2": A, "h_W_m2K": h,
+            "j": j, "f": f, "Re_Dc": fl["Re_Dc"], "Pr": Pr,
+            "note": "이 j·f 를 closure 에 주입하면 상관식 대신 실측값이 됨"}
+
+
+def heat_area_m2(p: FTHXParams) -> float:
+    """셀의 공기측 전열면적 [m2] — 핀 노출면(위) + 관 외벽 노출면."""
+    import cadquery as cq  # noqa: F401
+    g = cell_geometry(p)
+    assy, _ = build(p)
+    B = {c.name: c.obj for c in assy.children}
+    tf2 = g["t_f_half"]
+    A = 0.0
+    fin = B.get("solid_fin")
+    if fin is not None:
+        A += sum(f.Area() for f in fin.Faces()
+                 if abs(f.normalAt(f.Center()).z) > 0.99
+                 and abs(f.Center().z - tf2) < 1e-9)
+    for k, v in B.items():
+        if not k.startswith("solid_tube"):
+            continue
+        for f in v.Faces():
+            if f.geomType() != "CYLINDER" or f.Center().z <= tf2 + 1e-9:
+                continue
+            bb = f.BoundingBox()
+            if abs(max(bb.xlen, bb.ylen) / 2 - p.tube.Do / 2) < 1e-3:
+                A += f.Area()
+    return A / 1e6

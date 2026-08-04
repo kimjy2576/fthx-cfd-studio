@@ -1,0 +1,105 @@
+{
+  "schema_version": "fthx/1",
+  "name": "cell_plain_cell",
+  "units": "mm",
+  "mode": "periodic_cell",
+  "geometry": {
+    "Lx": 176.0,
+    "Ly": 12.7,
+    "Lz": 0.9071428571428571,
+    "L_up": 44.0,
+    "L_down": 88.0,
+    "x_core": [
+      44.0,
+      88.0
+    ],
+    "Fp": 1.8142857142857143,
+    "t_f_half": 0.0575,
+    "gap_half": 0.8496428571428571,
+    "layout": "staggered"
+  },
+  "tube_centers": [
+    {
+      "r": 0,
+      "x": 55.0,
+      "y": 0.0
+    },
+    {
+      "r": 1,
+      "x": 77.0,
+      "y": 12.7
+    }
+  ],
+  "face_seeds": {
+    "cell_inlet": [
+      0.0,
+      6.35,
+      0.48232142857142857
+    ],
+    "cell_outlet": [
+      176.0,
+      6.35,
+      0.48232142857142857
+    ],
+    "sym_y0": [
+      66.0,
+      0.0,
+      0.48232142857142857
+    ],
+    "sym_y1": [
+      66.0,
+      12.7,
+      0.48232142857142857
+    ],
+    "sym_z1": [
+      66.0,
+      6.35,
+      0.9071428571428571
+    ]
+  },
+  "operating": {
+    "air": {
+      "V_face": 2.0,
+      "T_in": 27.0,
+      "RH_in": 50.0,
+      "P_in": 101325.0
+    },
+    "ref": {
+      "fluid": "R410A",
+      "mode": "evaporator",
+      "m_total": 0.03,
+      "T_sat_in": 7.0,
+      "quality_in": null,
+      "superheat_out": 5.0,
+      "subcool_out": null
+    },
+    "thermal": {
+      "model": "equilibrium",
+      "contact_R": 0.0
+    }
+  },
+  "operating_derived": {
+    "air": {
+      "rho": 1.1686226699193116,
+      "mu": 1.844231745733014e-05,
+      "cp": 1016.1050495480933,
+      "W": 0.011195553880206086,
+      "source": "CoolProp/HAPropsSI",
+      "A_front_m2": 0.0038099999999999996,
+      "m_dot_kgs": 0.008904904744785154,
+      "u_max_ms": 2.8693148522345218,
+      "G_max": 3.353146383457442,
+      "Re_Dc": 1772.7260857726822,
+      "Re_Dh": 489.19736621725303
+    },
+    "ref": {
+      "fluid": "R410A",
+      "mode": "evaporator",
+      "m_total_kgs": 0.03,
+      "T_sat_in_C": 7.0
+    },
+    "thermal": "equilibrium"
+  },
+  "note": "핀 실형상 · 포러스 없음. 네 측면이 모두 대칭면.",
+  "overlap": []
+}
