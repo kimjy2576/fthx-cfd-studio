@@ -388,8 +388,12 @@ def porous_df(p: FTHXParams) -> dict:
     from . import closure
     a = closure.air_side(p)
     od = p.operating_derived()["air"]
-    d1 = 1.0 / a["alpha_m2"] if a["alpha_m2"] else 0.0
-    return {"d": d1, "f": a["C2_1perm"], "block_factor": 1e3,
+    # ⚠ closure 의 alpha 와 C2 는 각각 '단독으로' dp 전체를 재현하는
+    #   상호배타적 폐합임 (mu·(1/alpha)·u·W ≡ dp, C2·W·(rho/2)u² ≡ dp).
+    #   둘을 합치면 구조적으로 2배 — 설계점(Re~2e3, 관성 지배)은 f=C2 단독.
+    #   실측: d+f 동시 적용 시 CFD dP 16.0 Pa (해석해 4.16 의 ~4배).
+    #   저유량 스윕에서는 Re 별 재폐합 필요 (closure 규약 이슈로 기록).
+    return {"d": 0.0, "f": a["C2_1perm"], "block_factor": 1e3,
             "dp_core_Pa": a["dp_core_Pa"], "porosity": a["porosity"],
             "rho": od["rho"], "mu": od["mu"], "nu": od["mu"] / od["rho"],
             "U_face": p.operating.air.V_face}

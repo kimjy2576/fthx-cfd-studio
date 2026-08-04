@@ -1291,10 +1291,10 @@ def test_cell_air_sits_above_fin():
                   "constant/transportProperties", "system/fvOptions",
                   "Allrun.solve"):
             assert (c / f).exists(), f
-        # Fluent↔OpenFOAM 계수 매핑: d=1/alpha, f=C2 (변환계수 없음)
+        # 계수 매핑: f=C2 단독 (alpha 폐합과 상호배타 — 합치면 dp 2배)
         pf = porous_df(p)
         a = closure.air_side(p)
-        assert abs(pf["d"] * a["alpha_m2"] - 1.0) < 1e-9
+        assert pf["d"] == 0.0
         assert pf["f"] == a["C2_1perm"]
         fv = (c / "system/fvOptions").read_text("utf-8")
         assert "DarcyForchheimer" in fv and "fluid_air_core_r01" in fv
