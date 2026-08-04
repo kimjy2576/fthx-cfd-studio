@@ -849,9 +849,11 @@ def test_journal_m2_labeling_section():
     from fthx import presets, exporters
     j = exporters.fluent_journal(presets.probe(),
                                  face_seeds={"air_inlet": [-40.0, 38.1, 50.0]})
-    assert 'MU.get_face_zones(filter="*")' in j
+    assert 'get_face_zones(filter="*")' in j
     assert "get_average_bounding_box_center(face_zone_id_list=[zid])" in j
     assert "get_face_zone_area(face_zone_id_list=[zid])" in j
+    # 라벨링이 깨져도 메시는 남아야 함
+    assert "11b. 메시 선저장" in j
     # 각도 분리는 제거됨 — 케이싱이 대신하고, 32노드 병렬에서 SIGSEGV 를 유발했음
     assert "sep_face_zone_by_angle" not in j
     assert "13. face_seeds 좌표 매칭" in j
