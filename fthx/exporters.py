@@ -154,6 +154,17 @@ def _try_all(label, trials):
 
 try_all = _try_all      # 호출부가 두 이름을 섞어 씀
 
+
+def have(obj, name):
+    """속성이 실제로 존재하고 호출 가능한지.
+
+    Fluent 객체는 없는 이름에 None 이나 빈 메뉴를 돌려줌 —
+    getattr 결과만 보고 판단하면 'NoneType object is not callable' 로
+    한 라운드를 버리게 됨 (실측 반복).
+    """
+    v = getattr(obj, name, None)
+    return v if (v is not None and callable(v)) else None
+
 def TUI_EXEC(cmd):
     """TUI 문자열 실행. 0단계에서 meshing.execute_tui 가 [OK] 였으나
        12b 에서 NameError 가 났음 — 후보를 넓혀 다시 찾음."""
@@ -431,81 +442,62 @@ step("11b. 메시 선저장", lambda: TUI().file.write_mesh(MESH_OUT))
 step("12. 면 존 표 (id/이름/좌표/면적)", _dump_zones)
 
 def _sep_api():
-    """seed 좌표로 존을 쪼갬. 실패해도 메시는 이미 저장돼 있음(11b).
+    """존 분리. 실제로 존재하는 함수만 골라 쓴다.
 
-    실측: separate_face_zones_by_seed() 는 존재하나
-          seed_point 라는 인자명은 없음 (unexpected keyword argument).
+    실측: separate_face_zones_by_seed 는 None 이었음
+          (getattr 이 없는 이름에 None 을 돌려줌 — dir 목록을 잘못 읽었음)
+          execute_tui by-seed 도 False (경로·인자 불일치)
     """
     mu = _MU()
     if mu is None:
         print("    meshing_utilities 없음")
         return
     globals()["MU"] = mu
-    fn = getattr(mu, "separate_face_zones_by_seed", None)
-    # 실측 시그니처: face_zone_name_list + seed_points (복수형, list of lists)
-    print("    대상 존을 seed 로 분리")
-    rows = globals().get("_ROWS") or []
-    # 이름을 못 얻는 경우가 있으므로 좌표로도 고를 수 있게 함.
-    # 입출구 seed 에 가장 가까운 존이 곧 그 면을 품고 있는 존임.
-    def pick(sd):
-        best, bd = None, 1e18
-        for r in rows:
-            c = r.get("c")
-            if not c:
-                continue
-            d = sum((c[i] - sd[i]) ** 2 for i in range(3)) ** 0.5
-            if d < bd:
-                best, bd = r, d
-        return best, bd
-    named = [r for r in rows if r.get("name") and "fluid_cell" in str(r["name"])
-             and "-solid-" not in str(r["name"])]
-    print("      이름으로 고른 대상: %s" % [r["name"] for r in named])
-    print("      전체 존 %d개 (이름 있는 것 %d개)"
-          % (len(rows), sum(1 for r in rows if r.get("name"))))
-    for key in ("cell_inlet", "cell_outlet"):
-        sd = FACE_SEEDS.get(key)
-        if not sd:
+
+    print("    --- 실제 존재하는 분리/마킹 함수 ---")
+    real = []
+    for x in dir(mu):
+        if x.startswith("_"):
             continue
-        cand = named or [pick(sd)[0]] if rows else []
-        cand = [c for c in cand if c]
-        for r in cand:
-            zn = r.get("name")
-            if not zn:
-                print("      %s: 이름 없음 — id %s 로 시도" % (key, r["id"]))
-            got, _ = try_all("%s <- %s seed %s"
-                             % (key, zn, [round(v, 2) for v in sd]), [
-                ("id_list + seed_points",
-                 lambda r=r, sd=sd: mu.separate_face_zones_by_seed(
-                     face_zone_id_list=[r["id"]], seed_points=[list(sd)])),
-                ("name_list + seed_points",
-                 lambda zn=zn, sd=sd: mu.separate_face_zones_by_seed(
-                     face_zone_name_list=[zn], seed_points=[list(sd)])),
-                ("patterns + seed_points",
-                 lambda zn=zn, sd=sd: mu.separate_face_zones_by_seed(
-                     face_zone_patterns=[zn], seed_points=[list(sd)])),
-                ("id_list + seed_points",
-                 lambda r=r, sd=sd: mu.separate_face_zones_by_seed(
-                     face_zone_id_list=[r["id"]], seed_points=[list(sd)])),
-                ("execute_tui by-seed",
-                 lambda zn=zn, sd=sd: TUI_EXEC(
-                     "/boundary/separate/sep-face-zone-by-seed %s %g %g %g 40 ()"
-                     % (zn, sd[0], sd[1], sd[2]))),
-            ])
-            if got:
-                break
-    # 분리 전후를 비교 — 17개였다가 8개로 줄면 뭔가 잘못된 것
+        if not any(k in x.lower() for k in
+                   ("separate", "split", "mark", "region", "seed")):
+            continue
+        v = getattr(mu, x, None)
+        ok = v is not None and callable(v)
+        real.append((x, ok))
+    for x, ok in real:
+        print("      %-46s %s" % (x, "호출가능" if ok else "None/비호출"))
+    usable = [x for x, ok in real if ok]
+
+    # 시그니처를 doc 에서 뽑음
+    for x in usable:
+        fn = getattr(mu, x)
+        d = (fn.__doc__ or "").strip().splitlines()
+        head = " ".join(d[:6])[:300] if d else "(doc 없음)"
+        print("      >> %-40s %s" % (x, head))
+
+    print("    --- TUI separate 하위 (호출 가능 여부) ---")
     try:
-        after = zone_table()
-        print("    분리 후 면 존 %d개 (분리 전 %d개)" % (len(after), len(rows)))
-        for r in after:
-            c = r["c"]
-            print("      %-8s %-44s %s  %s" % (
-                r["id"], str(r["name"])[:44],
-                ("[%8.2f %7.2f %6.3f]" % tuple(c)) if c else "?",
-                ("%.1f" % r["area"]) if r["area"] else ""))
-        globals()["_ROWS"] = after
+        sep = TUI().boundary.separate
+        for x in dir(sep):
+            if x.startswith("_"):
+                continue
+            v = getattr(sep, x, None)
+            print("      %-40s %s" % (x, type(v).__name__))
     except Exception as ex:
-        print("    존 재조회 실패: %s" % ex)
+        print("      실패: %s" % str(ex)[:120])
+
+    print("    --- execute_tui 로 메뉴 탐색 ---")
+    for cmd in ("/boundary/separate/",
+                "/boundary/manage/",
+                "/objects/"):
+        try:
+            print("      %s -> %s" % (cmd, str(TUI_EXEC(cmd))[:200]))
+        except Exception as ex:
+            print("      %s !! %s" % (cmd, str(ex)[:100]))
+
+    rows = globals().get("_ROWS") or []
+    print("    존 %d개 (분리 대상 판단용)" % len(rows))
 step("12b. seed 기반 존 분리", _sep_api)
 
 # 각도 분리 단계는 제거함.
