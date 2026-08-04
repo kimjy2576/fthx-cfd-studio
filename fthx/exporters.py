@@ -656,7 +656,9 @@ def TUI():
     raise NameError("TUI 진입점 없음. globals: "
                     + ", ".join(sorted(k for k in g if not k.startswith("_")))[:400])
 
-def try_all(label, trials):
+def try_all(label, trials, stop_on_success=True):
+    """성공하면 즉시 반환. 실측에서 iterate 가 두 번 돌아 1155회까지 간 적 있음
+       (iter_count= 로 성공했는데 다음 후보도 실행됨)."""
     print("  == " + label)
     for name, fn in trials:
         try:
@@ -665,7 +667,8 @@ def try_all(label, trials):
                 print("    [--] " + name + " -> False")
                 continue
             print("    [OK] " + name)
-            return name, out
+            if stop_on_success:
+                return name, out
         except Exception as ex:
             print("    [--] " + name + " : " + type(ex).__name__ + ": " + str(ex)[:100])
     return None, None
@@ -970,14 +973,15 @@ def _reports():
         pass
     # 실측: surface_areaavg / surface_massavg / flux 는 없음. 위 목록에서
     # 실제 이름을 골라 쓸 것. 아래는 흔한 후보들.
+    # 실측 확정: rd.surface / rd.flux (surface_areaavg 아님)
     specs = [
-        ("dp_air", ["surface", "surface_report", "area_weighted_avg"],
+        ("dp_air", ["surface"],
          {{"report_type": "surface-areaavg", "field": "pressure",
           "surface_names": ["air_inlet"]}}),
-        ("t_air_out", ["surface", "surface_report", "mass_weighted_avg"],
+        ("t_air_out", ["surface"],
          {{"report_type": "surface-massavg", "field": "temperature",
           "surface_names": ["air_outlet"]}}),
-        ("m_air_in", ["flux", "mass_flow", "surface"],
+        ("m_air_in", ["flux"],
          {{"report_type": "flux-massflow", "zone_names": ["air_inlet"]}}),
     ]
     for nm, kinds, args in specs:

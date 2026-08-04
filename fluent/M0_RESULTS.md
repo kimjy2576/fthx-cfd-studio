@@ -364,3 +364,36 @@ S.solution.run_calculation.iterate(iter_count=N)
 얻을 수 있으나, 수렴 감시용 리포트는 타입 이름 확정이 필요함.
 
 50회는 초기 과도구간이라 수렴 판정은 아직임.
+
+---
+
+# M4 완료 — 수렴 (500회, 32 core)
+
+| | 값 |
+|---|---|
+| 공기 입구 | 4.1519 Pa |
+| 공기 출구 | -0.0032 Pa |
+| **CFD 코어 dP** | **4.155 Pa** |
+| **closure 예측** | **4.156 Pa** |
+| **오차** | **0.03%** |
+
+residual: continuity 1.5e-07, energy 1.4e-10 — 사실상 기계 정밀도.
+50회 4.10 → 500회 4.155 로 수렴.
+
+**closure(j/f 상관식) → C2 80.85 1/m → Fluent 포러스 → CFD dP** 사슬이
+소수점 셋째 자리까지 일치함. 앱이 계산한 계수가 그대로 물리로 재현됨.
+
+## 확정 API
+
+```python
+S.solution.run_calculation.iterate(iter_count=N)
+S.solution.report_definitions.surface   # surface_areaavg 아님
+S.solution.report_definitions.flux
+# 하위 전체: surface, flux, force, volume, moment, aeromechanics,
+#            drag, lift, expression, single_val_expression, user_defined ...
+```
+
+## 잡은 버그
+
+`try_all` 이 성공 후에도 다음 후보를 실행해 **iterate 가 두 번 돌았음**
+(500 요청인데 1155회까지 진행). 결과에는 무해했으나 조기 반환하도록 수정.
