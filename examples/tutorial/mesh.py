@@ -295,40 +295,55 @@ def _try_all(label, trials):
     return None, None
 
 def zone_names(ids):
-    """존 id -> 이름. 실측: convert_zone_ids_to_name_strings 가 None 을 반환함.
-       이름을 못 얻으면 분리도 매칭도 불가하므로 여러 경로를 시도한다."""
+    """존 id -> 이름. **어떤 경우에도 예외를 내지 않음.**
+
+    실측 회귀: 이 함수가 예외를 던져 zone_table -> _match -> write_mesh 까지
+    연쇄로 무너져 메시 파일조차 안 나왔음. 이름은 좌표 매칭에 필수가 아니므로
+    실패하면 빈 목록을 돌려주고 진행한다.
+    """
     mu = _MU()
-    nm, out = _try_all("존 id -> 이름", [
-        ("convert_zone_ids_to_name_strings(zone_id_list=)",
-         lambda: mu.convert_zone_ids_to_name_strings(zone_id_list=list(ids))),
-        ("convert_zone_ids_to_name_strings(위치인자)",
-         lambda: mu.convert_zone_ids_to_name_strings(list(ids))),
-        ("get_face_zones(filter=*) 를 이름으로",
-         lambda: mu.get_face_zones(filter="*")),
-        ("get_zones(filter=*)", lambda: mu.get_zones(filter="*")),
-        ("scheme zone-name", lambda: [
-            TUI_EXEC("(zone-name %d)" % i) for i in list(ids)[:3]]),
-    ])
-    if not out:
-        # 마지막 수단 — id 만으로도 좌표 매칭은 가능함
-        print("    이름을 못 얻음 — id 기반으로 진행")
+    if mu is None:
         return []
-    if isinstance(out, (list, tuple)) and out and isinstance(out[0], str):
-        return list(out)
+    for label, fn in (
+            ("zone_id_list=", lambda: mu.convert_zone_ids_to_name_strings(
+                zone_id_list=list(ids))),
+            ("위치인자", lambda: mu.convert_zone_ids_to_name_strings(
+                list(ids))),
+    ):
+        try:
+            out = fn()
+        except Exception as ex:
+            print("    [--] 이름조회 %s : %s" % (label, str(ex)[:90]))
+            continue
+        if isinstance(out, (list, tuple)) and out and isinstance(out[0], str):
+            print("    [OK] 이름조회 %s" % label)
+            return list(out)
+        print("    [--] 이름조회 %s -> %s" % (label, str(out)[:60]))
+    print("    이름을 못 얻음 — id + 좌표로 진행 (매칭에 이름은 불필요)")
     return []
 
 def zone_table():
-    """면 존별 id · 이름 · 대표좌표 · 면적. 라벨링의 기초 자료."""
-    ids = MU.get_face_zones(filter="*")
+    """면 존별 id · 이름 · 대표좌표 · 면적. 실패해도 빈 목록을 돌려줌."""
+    mu = _MU()
+    if mu is None:
+        print("    meshing_utilities 없음")
+        return []
+    try:
+        ids = mu.get_face_zones(filter="*")
+    except Exception as ex:
+        print("    면 존 조회 실패: %s" % str(ex)[:120])
+        return []
+    if not ids:
+        return []
     names = zone_names(ids)
     rows = []
     for i, zid in enumerate(ids):
         try:
-            c = MU.get_average_bounding_box_center(face_zone_id_list=[zid])
+            c = mu.get_average_bounding_box_center(face_zone_id_list=[zid])
         except Exception:
             c = None
         try:
-            a = MU.get_face_zone_area(face_zone_id_list=[zid])
+            a = mu.get_face_zone_area(face_zone_id_list=[zid])
         except Exception:
             a = None
         rows.append({"id": zid,
@@ -347,6 +362,9 @@ def _dump_zones():
         print("    %-8s %-46s %-34s %s" %
               (r["id"], str(r["name"])[:46], cs,
                ("%.1f" % r["area"]) if r["area"] else "?"))
+# 라벨링보다 먼저 저장 — 이후 단계가 깨져도 메시는 보존됨
+# (실측 회귀: zone_table 예외로 write_mesh 까지 못 갔음)
+step("11b. 메시 선저장", lambda: TUI().file.write_mesh(MESH_OUT))
 step("12. 면 존 표 (id/이름/좌표/면적)", _dump_zones)
 
 def TUI_EXEC(cmd):
@@ -370,7 +388,7 @@ def TUI_EXEC(cmd):
                                               if "mesh" in k.lower()))))
 
 def _sep_api():
-    """seed 좌표로 존을 쪼갬. 시그니처를 먼저 캐낸 뒤 호출한다.
+    """seed 좌표로 존을 쪼갬. 실패해도 메시는 이미 저장돼 있음(11b).
 
     실측: separate_face_zones_by_seed() 는 존재하나
           seed_point 라는 인자명은 없음 (unexpected keyword argument).
@@ -452,8 +470,12 @@ step("12b. seed 기반 존 분리", _sep_api)
 # 분리가 필요 없음. 남겨두면 32노드 병렬에서 SIGSEGV 를 유발했음(실측).
 
 def _match():
-    """존 좌표를 face_seeds 와 최근접 매칭."""
+    """존 좌표를 face_seeds 와 최근접 매칭. rows 가 비어도 죽지 않음."""
     rows = zone_table()
+    if not rows:
+        print("    면 존 정보 없음 — 매칭 생략")
+        globals()["_HITS"] = {}
+        return
     globals()["_ROWS2"] = rows
     print("    면 존 %d개" % len(rows))
     cand = [r for r in rows if r["c"]]
