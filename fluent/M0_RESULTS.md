@@ -251,3 +251,71 @@ ref_inlet_c01   -> fluid_ref_r01t01-solid:1  0.004 mm
 ref_outlet_c01  -> fluid_ref_r01t03-solid:1  0.010 mm
 임계값 1mm 초과: 없음
 ```
+
+
+---
+
+# M3 완료 — SETUP (2025 R1)
+
+`fluent 3ddp -g -t8 -i setup.py` 로 GUI 조작 없이 완주.
+13단계 전부 OK, 실패 0, `case.cas.h5` 54.2 MB 저장.
+
+## 최종 포러스 상태 (실측)
+
+```
+porous  = True
+gamma   = {'option':'constant', 'value': 0.930063}
+1/alpha = {'direction_1/2/3': 5123399.9}   1/m2
+C2      = {'option':'constant', 'direction_1/2/3': 80.8536}   1/m
+relative_velocity_resistance_formulation = False    ← superficial
+Laminar Zone = True
+```
+
+경계조건: 공기 2 m/s / 300.15 K (I=5%, D_h 2.299mm) · 0 Pa gauge
+          냉매 0.03 kg/s / 280.15 K
+
+## 확정된 API (Fluent 2025 R1)
+
+**경로는 `solver.settings.*`** — `solver.setup` 은 deprecated
+(Fluent 이 직접 경고: `'setup' is deprecated. Use 'settings.setup' instead`).
+
+```python
+S = solver.settings
+S.setup.cell_zone_conditions.fluid['<zone>']
+    .porous_zone.set_state({'porous': True})          # 먼저 켜야 하위 키가 드러남
+    .porous_zone.set_state({'viscous_resistance': {'direction_1':.., 'direction_2':.., 'direction_3':..}})
+    .porous_zone.set_state({'inertial_resistance': {'option':'constant','direction_1':..}})
+    .porous_zone.set_state({'fluid_porosity': {'option':'constant','value':..}})
+    .porous_zone.set_state({'relative_velocity_resistance_formulation': False})
+    .general.set_state({'laminar': True})
+
+S.setup.boundary_conditions.velocity_inlet['<zone>']
+    .momentum.set_state({'velocity_magnitude': {'option':'value','value':..}})
+    .thermal.set_state({'temperature': {'option':'value','value':..}})
+    .turbulence.set_state({'turbulent_specification': 'Intensity and Hydraulic Diameter',
+                           'turbulent_intensity': 0.05, 'hydraulic_diameter': ..})
+
+S.solution.methods.p_v_coupling.flow_scheme = 'Coupled'
+S.solution.initialization.hybrid_initialize()
+```
+
+## 겪은 것 (5 라운드)
+
+오류가 매 라운드 한 단계씩 앞으로 감:
+
+| 라운드 | 실패 | 원인 |
+|---|---|---|
+| 1 | `'TUIMenu' object has no attribute 'velocity_inlet'` | TUI 경로 추측. getattr 이 빈 메뉴를 돌려주므로 판정 불가 |
+| 2 | `porous` 속성 없음 | `solver.setup` 이 deprecated |
+| 3 | `'velocity_inlet' has no attribute 'air_inlet'` | 존이 전부 wall — 이름만 바꾸고 **타입을 안 바꿈** |
+| 4 | `KeyError: 't'` / `'porous'` | 키 이름 (`temperature`, `porous_zone.porous`) |
+| 5 | 저항 키 | `porous=True` 로 켠 뒤에만 드러남 |
+
+**교훈: 추측하지 말고 `get_state()` 로 스키마를 캐낼 것.**
+4라운드부터 그 방식으로 바꾼 뒤 급격히 빨라졌음.
+
+## ⚠ relative_velocity_resistance_formulation
+
+**기본값이 True (= physical velocity).** superficial 기준으로 산출한 C2 를
+쓰려면 반드시 False 로 꺼야 함. 켜두면 dP 가 1/gamma^2 = 1.156 배 어긋남.
+계획 단계에서 '압도적 1위 오류원' 으로 지목했던 항목이 실제로 켜져 있었음.
