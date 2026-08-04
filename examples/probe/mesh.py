@@ -85,6 +85,56 @@ def TUI():
 step("InitializeWorkflow",
      lambda: workflow.InitializeWorkflow(WorkflowType="Watertight Geometry"))
 
+def _MU():
+    """모듈 로드 시점이 아니라 호출 시점에 찾음.
+       (실측: 0단계에서는 있던 이름이 12b 에서 NameError 가 났음)"""
+    g = globals()
+    for nm in ("meshing_utilities", "meshing_utilities_app"):
+        o = g.get(nm)
+        if o is not None:
+            return o
+    return None
+
+MU = _MU()
+
+def _try_all(label, trials):
+    print("  == " + label)
+    for name, fn in trials:
+        try:
+            out = fn()
+            if out is False or out is None:
+                # 실측: convert_zone_ids_to_name_strings 가 None 을 반환하는데
+                # [OK] 로 찍혀 이름 없는 _ROWS 가 만들어졌음
+                print("    [--] " + name + " -> " + str(out) + " (값 없음)")
+                continue
+            print("    [OK] " + name + " -> " + str(out)[:300])
+            return name, out
+        except Exception as e:
+            print("    [--] " + name + " : " + type(e).__name__ + ": " + str(e)[:90])
+    return None, None
+
+try_all = _try_all      # 호출부가 두 이름을 섞어 씀
+
+def TUI_EXEC(cmd):
+    """TUI 문자열 실행. 0단계에서 meshing.execute_tui 가 [OK] 였으나
+       12b 에서 NameError 가 났음 — 후보를 넓혀 다시 찾음."""
+    g = globals()
+    last = None
+    for nm in ("meshing", "meshing_app", "session", "solver", "root"):
+        o = g.get(nm)
+        if o is None:
+            continue
+        for attr in ("execute_tui", "exec_tui", "tui_exec"):
+            fn = getattr(o, attr, None)
+            if fn is not None:
+                try:
+                    return fn(cmd)
+                except Exception as ex:
+                    last = "%s.%s: %s" % (nm, attr, ex)
+    raise NameError("execute_tui 경로 없음 (%s) · globals: %s"
+                    % (last, ", ".join(sorted(k for k in g
+                                              if "mesh" in k.lower()))))
+
 def _probe_import_api():
     """임포트·존분리 API 를 통째로 덤프. 추측을 멈추고 실제를 본다.
 
@@ -266,33 +316,7 @@ FACE_SEEDS = {"air_inlet": [-40.0, 38.1, 50.0], "air_outlet": [102.0, 38.1, 50.0
 #  걸림돌: Import Geometry 에 면 단위 존 옵션이 없어 존이 바디 단위로 묶임.
 #         → 각도로 분리한 뒤 좌표 매칭.
 # ══════════════════════════════════════════════════════════════
-def _MU():
-    """모듈 로드 시점이 아니라 호출 시점에 찾음.
-       (실측: 0단계에서는 있던 이름이 12b 에서 NameError 가 났음)"""
-    g = globals()
-    for nm in ("meshing_utilities", "meshing_utilities_app"):
-        o = g.get(nm)
-        if o is not None:
-            return o
-    return None
 
-MU = _MU()
-
-def _try_all(label, trials):
-    print("  == " + label)
-    for name, fn in trials:
-        try:
-            out = fn()
-            if out is False or out is None:
-                # 실측: convert_zone_ids_to_name_strings 가 None 을 반환하는데
-                # [OK] 로 찍혀 이름 없는 _ROWS 가 만들어졌음
-                print("    [--] " + name + " -> " + str(out) + " (값 없음)")
-                continue
-            print("    [OK] " + name + " -> " + str(out)[:300])
-            return name, out
-        except Exception as e:
-            print("    [--] " + name + " : " + type(e).__name__ + ": " + str(e)[:90])
-    return None, None
 
 def zone_names(ids):
     """존 id -> 이름. **어떤 경우에도 예외를 내지 않음.**
@@ -366,26 +390,6 @@ def _dump_zones():
 # (실측 회귀: zone_table 예외로 write_mesh 까지 못 갔음)
 step("11b. 메시 선저장", lambda: TUI().file.write_mesh(MESH_OUT))
 step("12. 면 존 표 (id/이름/좌표/면적)", _dump_zones)
-
-def TUI_EXEC(cmd):
-    """TUI 문자열 실행. 0단계에서 meshing.execute_tui 가 [OK] 였으나
-       12b 에서 NameError 가 났음 — 후보를 넓혀 다시 찾음."""
-    g = globals()
-    last = None
-    for nm in ("meshing", "meshing_app", "session", "solver", "root"):
-        o = g.get(nm)
-        if o is None:
-            continue
-        for attr in ("execute_tui", "exec_tui", "tui_exec"):
-            fn = getattr(o, attr, None)
-            if fn is not None:
-                try:
-                    return fn(cmd)
-                except Exception as ex:
-                    last = "%s.%s: %s" % (nm, attr, ex)
-    raise NameError("execute_tui 경로 없음 (%s) · globals: %s"
-                    % (last, ", ".join(sorted(k for k in g
-                                              if "mesh" in k.lower()))))
 
 def _sep_api():
     """seed 좌표로 존을 쪼갬. 실패해도 메시는 이미 저장돼 있음(11b).

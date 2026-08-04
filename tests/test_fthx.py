@@ -1204,3 +1204,31 @@ def test_cell_mesh_journal_uses_seed_separation():
     # 분리 → 매칭 → 개명 순서
     assert j.index("12b. seed 기반 존 분리") < j.index("13. face_seeds 좌표 매칭")
     assert j.index("13. face_seeds 좌표 매칭") < j.index("14. 존 이름 부여")
+
+
+def test_journal_defines_helpers_before_use():
+    """저널은 위에서 아래로 실행됨 — 헬퍼가 첫 호출보다 앞에 있어야 함.
+       실측: 0단계를 앞에 삽입했더니 try_all 이 아직 없어 임포트가 실패했고,
+       그 여파로 TUI 트리가 달라져 write_mesh 까지 못 했음."""
+    import re
+    from fthx import presets, exporters, cell
+    p = presets.cell()
+    for j in (exporters.cell_mesh_journal(
+                  p, n_bodies=6, face_seeds=cell.build(p)[1]["face_seeds"]),
+              exporters.fluent_journal(presets.probe(), n_bodies=16)):
+        lines = j.splitlines()
+        defs = {}
+        for i, l in enumerate(lines):
+            m = re.match(r"^(?:def (\w+)|(\w+) = _?\w+ *(?:#.*)?$)", l)
+            if m:
+                nm = m.group(1) or m.group(2)
+                defs.setdefault(nm, i)
+        for name in ("step", "TUI", "try_all", "_try_all", "task", "set_args"):
+            if name not in defs:
+                continue
+            first = next((i for i, l in enumerate(lines)
+                          if re.search(r"(?<![\w_])%s\(" % name, l)
+                          and not l.lstrip().startswith("def ")), None)
+            if first is None:
+                continue
+            assert defs[name] < first, f"{name} 정의({defs[name]}) > 첫 호출({first})"
