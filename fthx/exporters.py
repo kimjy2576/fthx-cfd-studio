@@ -404,55 +404,47 @@ def _sep_api():
         return
     globals()["MU"] = mu
     fn = getattr(mu, "separate_face_zones_by_seed", None)
-    print("    --- separate_face_zones_by_seed 시그니처 ---")
-    for label, get in (
-            ("__doc__", lambda: fn.__doc__),
-            ("inspect.signature", lambda: __import__("inspect").signature(fn)),
-            ("__wrapped__ doc", lambda: fn.__wrapped__.__doc__),
-            ("dir", lambda: [x for x in dir(fn) if not x.startswith("_")]),
-    ):
-        try:
-            print("      %-20s %s" % (label, str(get())[:600]))
-        except Exception as ex:
-            print("      %-20s !! %s" % (label, str(ex)[:80]))
-    # 인자명 없이 호출해 오류 메시지에서 필수 인자를 얻음
-    try:
-        fn()
-    except Exception as ex:
-        print("      무인자 호출 -> %s: %s" % (type(ex).__name__, str(ex)[:300]))
-
-    print("    --- TUI 경로 확인 ---")
-    try:
-        print("      %s" % str(TUI_EXEC("/boundary/manage/list"))[:200])
-    except Exception as ex:
-        print("      !! %s" % str(ex)[:300])
-
+    # 실측 시그니처: face_zone_name_list + seed_points (복수형, list of lists)
+    print("    대상 존을 seed 로 분리")
     rows = globals().get("_ROWS") or []
     targets = [r for r in rows if r["name"] and "fluid_cell" in str(r["name"])
                and "-solid-" not in str(r["name"])]
-    print("    대상 존: %s" % [r["name"] for r in targets])
+    print("      대상: %s" % [r["name"] for r in targets])
     for key in ("cell_inlet", "cell_outlet"):
         sd = FACE_SEEDS.get(key)
-        if not sd or not targets:
+        if not sd:
             continue
-        x, y, z = sd
         for r in targets:
             zn = r["name"]
-            got, _ = try_all("%s <- %s" % (key, zn), [
-                ("seed=[x,y,z]", lambda zn=zn: mu.separate_face_zones_by_seed(
-                    face_zone_name_list=[zn], seed=[x, y, z])),
-                ("point=[x,y,z]", lambda zn=zn: mu.separate_face_zones_by_seed(
-                    face_zone_name_list=[zn], point=[x, y, z])),
-                ("위치인자", lambda zn=zn: mu.separate_face_zones_by_seed(
-                    [zn], [x, y, z])),
-                ("execute_tui by-seed", lambda zn=zn: TUI_EXEC(
-                    "/boundary/separate/sep-face-zone-by-seed %s %g %g %g 40 ()"
-                    % (zn, x, y, z))),
+            got, _ = try_all("%s <- %s seed %s"
+                             % (key, zn, [round(v, 2) for v in sd]), [
+                ("name_list + seed_points",
+                 lambda zn=zn, sd=sd: mu.separate_face_zones_by_seed(
+                     face_zone_name_list=[zn], seed_points=[list(sd)])),
+                ("patterns + seed_points",
+                 lambda zn=zn, sd=sd: mu.separate_face_zones_by_seed(
+                     face_zone_patterns=[zn], seed_points=[list(sd)])),
+                ("id_list + seed_points",
+                 lambda r=r, sd=sd: mu.separate_face_zones_by_seed(
+                     face_zone_id_list=[r["id"]], seed_points=[list(sd)])),
+                ("execute_tui by-seed",
+                 lambda zn=zn, sd=sd: TUI_EXEC(
+                     "/boundary/separate/sep-face-zone-by-seed %s %g %g %g 40 ()"
+                     % (zn, sd[0], sd[1], sd[2]))),
             ])
             if got:
                 break
+    # 분리 전후를 비교 — 17개였다가 8개로 줄면 뭔가 잘못된 것
     try:
-        print("    분리 후 면 존 %d개" % len(mu.get_face_zones(filter="*")))
+        after = zone_table()
+        print("    분리 후 면 존 %d개 (분리 전 %d개)" % (len(after), len(rows)))
+        for r in after:
+            c = r["c"]
+            print("      %-8s %-44s %s  %s" % (
+                r["id"], str(r["name"])[:44],
+                ("[%8.2f %7.2f %6.3f]" % tuple(c)) if c else "?",
+                ("%.1f" % r["area"]) if r["area"] else ""))
+        globals()["_ROWS"] = after
     except Exception as ex:
         print("    존 재조회 실패: %s" % ex)
 step("12b. seed 기반 존 분리", _sep_api)
