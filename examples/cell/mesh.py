@@ -87,27 +87,66 @@ def TUI():
 step("InitializeWorkflow",
      lambda: workflow.InitializeWorkflow(WorkflowType="Watertight Geometry"))
 
-def _import():
-    """면 단위 존 생성을 시도함.
+def _probe_import_api():
+    """임포트·존분리 API 를 통째로 덤프. 추측을 멈추고 실제를 본다.
 
-    Fluent 은 '인접 관계가 같은 면'을 한 존으로 묶으므로, 바디 단위로 두면
-    입구면이 대칭면·측벽과 한 덩어리가 되어 BC 를 걸 수 없음.
-    (실측: fluid_cell_up-solid:1 이 1203mm2 — 입구면만이면 10.8mm2)
-
-    대칭면끼리 묶이는 것은 무방함(전부 같은 symmetry BC). 입출구만 분리되면 됨.
+    실측: run_menu 는 메싱에도 없음(NameError). meshing_utilities 는 있음.
     """
+    g = globals()
+    print("    --- globals (전체) ---")
+    ns = sorted(k for k in g if not k.startswith("_"))
+    for i in range(0, len(ns), 6):
+        print("      " + ", ".join(ns[i:i + 6]))
+
+    print("    --- TUI 문자열 실행 후보 ---")
+    LIST = "/boundary/manage/list"
+    for label, fn in (
+            ("meshing.tui(LIST)", lambda: g["meshing"].tui(LIST)),
+            ("meshing.execute_tui(LIST)",
+             lambda: g["meshing"].execute_tui(LIST)),
+            ("meshing.scheme_eval", lambda: g["meshing"].scheme_eval.scheme_eval(
+                "(ti-menu-load-string " + chr(34) + LIST + chr(34) + ")")),
+            ("PyTUI", lambda: g["PyTUI"]),
+            ("flapi dir", lambda: [x for x in dir(g["flapi"])
+                                   if not x.startswith("_")][:20]),
+            ("cx dir", lambda: [x for x in dir(g["cx"])
+                                if not x.startswith("_")][:20]),
+    ):
+        try:
+            print("      [OK] %-28s %s" % (label, str(fn())[:200]))
+        except Exception as ex:
+            print("      [--] %-28s %s: %s"
+                  % (label, type(ex).__name__, str(ex)[:80]))
+
+    print("    --- tui.file.import_ 하위 ---")
+    try:
+        imp = TUI().file.import_
+        print("      " + ", ".join(x for x in dir(imp)
+                                    if not x.startswith("_"))[:400])
+    except Exception as ex:
+        print("      실패: %s" % ex)
+
+    print("    --- 존 분리 관련 (meshing_utilities) ---")
+    mu = g.get("meshing_utilities")
+    if mu is not None:
+        hits = [x for x in dir(mu) if not x.startswith("_")
+                and any(k in x.lower() for k in
+                        ("separate", "split", "merge", "rename", "create",
+                         "label", "mark"))]
+        for i in range(0, len(hits), 3):
+            print("      " + ", ".join(hits[i:i + 3]))
+step("0. 임포트/분리 API 탐색", _probe_import_api)
+
+def _import():
+    """면 단위 존 생성 시도. 실패해도 바디 단위로 진행함."""
     t = task("Import Geometry")
     base = {"FileName": STEP, "LengthUnit": "mm", "AppendMesh": False}
-    got, _ = try_all("임포트 (면 단위 존)", [
-        ("CreateObjectPer=Face",
-         lambda: (set_args(t, dict(base, CreateObjectPer="Face")), t.Execute())[1]),
-        ("OneZonePer=Face",
-         lambda: (set_args(t, dict(base, OneZonePer="Face")), t.Execute())[1]),
-        ("run_menu cad-geometry per-face", lambda: globals()["run_menu"](
-            "/file/import/cad-geometry yes " + chr(34) + STEP + chr(34)
-            + " mm no no yes no")),
-        ("바디 단위 (기본)",
-         lambda: (set_args(t, base), t.Execute())[1]),
+    got, _ = try_all("임포트", [
+        ("CreateObjectPer=Face", lambda: (
+            set_args(t, dict(base, CreateObjectPer="Face")), t.Execute())[1]),
+        ("OneZonePer=Face", lambda: (
+            set_args(t, dict(base, OneZonePer="Face")), t.Execute())[1]),
+        ("바디 단위", lambda: (set_args(t, base), t.Execute())[1]),
     ])
     print("    임포트 방식: %s" % got)
     try:
@@ -285,6 +324,51 @@ def _dump_zones():
               (r["id"], str(r["name"])[:46], cs,
                ("%.1f" % r["area"]) if r["area"] else "?"))
 step("12. 면 존 표 (id/이름/좌표/면적)", _dump_zones)
+
+def _sep_api():
+    """좌표·법선으로 존을 쪼개는 경로 탐색.
+
+    면 단위 임포트가 안 되면 메시 후에 쪼개면 됨. 각도 분리는 이름을 파괴하므로
+    (probe 실측) 좌표/법선 기반이 있는지 본다.
+    """
+    mu = MU
+    if mu is None:
+        print("    meshing_utilities 없음")
+        return
+    hits = [x for x in dir(mu) if not x.startswith("_")
+            and any(k in x.lower() for k in
+                    ("separate", "split", "mark", "region", "normal",
+                     "angle", "seed", "island", "connected"))]
+    print("    분리/마킹 후보 (%d):" % len(hits))
+    for i in range(0, len(hits), 3):
+        print("      " + ", ".join(hits[i:i + 3]))
+    # 시그니처 확인
+    for nm in ("separate_face_zones_by_angle",
+               "separate_face_zones_by_seed",
+               "separate_face_zones_by_region",
+               "separate_face_zones_by_cell_neighbor",
+               "mark_faces_in_region"):
+        fn = getattr(mu, nm, None)
+        if fn is None:
+            print("      [--] %s 없음" % nm)
+            continue
+        try:
+            print("      [??] %-38s doc: %s" % (nm, str(fn.__doc__)[:160]))
+        except Exception:
+            print("      [??] %s 있음" % nm)
+    # TUI 쪽 경로도
+    try:
+        b = TUI().boundary
+        ns = [x for x in dir(b) if not x.startswith("_")]
+        print("    tui.boundary 하위 (%d): %s" % (len(ns), ns[:24]))
+        for sub in ("manage", "separate", "modify"):
+            o = getattr(b, sub, None)
+            if o is not None:
+                print("      .%s: %s" % (sub, [x for x in dir(o)
+                                               if not x.startswith("_")][:20]))
+    except Exception as ex:
+        print("    tui.boundary 실패: %s" % ex)
+step("12b. 존 분리 API 탐색", _sep_api)
 
 # 각도 분리 단계는 제거함.
 # 케이싱 솔리드가 있으면 상·하류 박스의 자유면이 입구/출구만 남아
