@@ -10,7 +10,9 @@ if grep -q "SETUP 완료" "$LOG" 2>/dev/null; then
   echo "=== SETUP (M3) ==="
   sed -n '/5. 포러스 계수/,/<<</p' "$LOG" | grep -E "porosity|Viscous|Inertial|Porosity|Laminar|Relative"
   sed -n '/7. 열 모델/,/<<</p' "$LOG" | grep -E "모드|h_eff|a_v|hv|단열"
-  echo "--- API 스키마 (다음 라운드 확정용) ---"
+  echo "--- 포러스 최종 상태 ---"
+  grep -E "^    \[최종\]|^           " "$LOG" | head -8
+  echo "--- API 스키마 ---"
   grep -E "^    \[스키마\]|^      [a-z_]+ +|^    child_names|^    포러스 대상|^    velocity_inlet|^    pressure_outlet|^    mass_flow_inlet" "$LOG" | head -60
   grep -E "^    \[OK\].*cas\.h5|^    \[!!\]" "$LOG"
 fi

@@ -32,6 +32,7 @@ H_EFF     = 59.7969       # W/m2K (핀효율 반영)
 A_V       = 1150.99         # 1/m
 HV        = 68825.64   # W/m3K
 V_FACE    = 2.0               # m/s
+D_H_AIR   = 0.002299   # m, 공기측 수력직경
 T_AIR_IN  = 300.15    # K
 T_REF     = 280.15  # K
 M_REF     = 0.03              # kg/s (전체)
@@ -185,6 +186,41 @@ def _porous():
             ("general.laminar = True",
              lambda o=obj: o.general.set_state({"laminar": True})),
         ])
+        # ⚠ 기본값이 True(=physical velocity). superficial 기준으로 산출한
+        #   C2 를 쓰려면 반드시 꺼야 함. 켜두면 dP 가 1/gamma^2 배 어긋남.
+        try_all("superficial velocity (relative_velocity_... = False)", [
+            ("relative_velocity_resistance_formulation=False",
+             lambda o=obj: o.porous_zone.set_state(
+                 {"relative_velocity_resistance_formulation": False})),
+        ])
+        try_all("점성 저항 1/alpha = %.4e 1/m2" % (1.0 / ALPHA), [
+            ("viscous_resistance direction_1..3",
+             lambda o=obj: o.porous_zone.set_state({"viscous_resistance": {
+                 "direction_1": 1.0 / ALPHA,
+                 "direction_2": 1.0 / ALPHA,
+                 "direction_3": 1.0 / ALPHA}})),
+        ])
+        try_all("관성 저항 C2 = %.4f 1/m" % C2, [
+            ("inertial_resistance direction_1..3",
+             lambda o=obj: o.porous_zone.set_state({"inertial_resistance": {
+                 "option": "constant",
+                 "direction_1": C2, "direction_2": C2, "direction_3": C2}})),
+        ])
+        try_all("공극률 %.6f" % POROSITY, [
+            ("fluid_porosity option/value",
+             lambda o=obj: o.porous_zone.set_state({"fluid_porosity": {
+                 "option": "constant", "value": POROSITY}})),
+        ])
+        try:
+            pz = obj.porous_zone.get_state()
+            print("    [최종] porous=%s  gamma=%s" % (
+                pz.get("porous"), pz.get("fluid_porosity")))
+            print("           1/alpha=%s" % str(pz.get("viscous_resistance"))[:70])
+            print("           C2     =%s" % str(pz.get("inertial_resistance"))[:70])
+            print("           relative_velocity_...=%s"
+                  % pz.get("relative_velocity_resistance_formulation"))
+        except Exception:
+            pass
     print("    → GUI 확인용")
     print("      Viscous Resistance 1/alpha = %.4e 1/m2" % (1.0 / ALPHA))
     print("      Inertial Resistance C2     = %.4f 1/m" % C2)
@@ -234,8 +270,13 @@ def _bc():
             ("momentum.velocity_magnitude",
              lambda o=obj: o.momentum.set_state(
                  {"velocity_magnitude": {"option": "value", "value": V_FACE}})),
-            ("momentum.velocity", lambda o=obj: o.momentum.set_state(
-                 {"velocity": {"option": "value", "value": V_FACE}})),
+        ])
+        try_all("난류 (I=5%%, 수력직경)", [
+            ("turbulence intensity+hydraulic_diameter",
+             lambda o=obj: o.turbulence.set_state({
+                 "turbulent_specification": "Intensity and Hydraulic Diameter",
+                 "turbulent_intensity": 0.05,
+                 "hydraulic_diameter": D_H_AIR})),
         ])
     else:
         print("    air_inlet 이 velocity_inlet 에 없음 — 5단계 타입 변경 확인")
@@ -275,9 +316,6 @@ def _bc():
             ("momentum.mass_flow_rate", lambda o=obj: o.momentum.set_state(
                 {"mass_flow_rate": {"option": "value",
                                     "value": M_REF / N_CIRCUIT}})),
-            ("momentum.mass_flow", lambda o=obj: o.momentum.set_state(
-                {"mass_flow": {"option": "value",
-                               "value": M_REF / N_CIRCUIT}})),
         ])
         try_all("냉매 입구 온도 %.1f K" % T_REF, [
             ("thermal.temperature", lambda o=obj: o.thermal.set_state(
