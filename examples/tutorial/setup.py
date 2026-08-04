@@ -33,6 +33,7 @@ A_V       = 1150.99         # 1/m
 HV        = 68825.64   # W/m3K
 V_FACE    = 2.0               # m/s
 D_H_AIR   = 0.002299   # m, 공기측 수력직경
+DP_PRED   = 4.1574        # Pa, closure 가 예측한 코어 압력강하
 T_AIR_IN  = 300.15    # K
 T_REF     = 280.15  # K
 M_REF     = 0.03              # kg/s (전체)
@@ -371,18 +372,35 @@ def _reports():
     if rd is None:
         print("    report_definitions 없음")
         return
-    print("    하위: %s" % [x for x in dir(rd) if not x.startswith("_")][:16])
+    avail = [x for x in dir(rd) if not x.startswith("_")]
+    print("    report_definitions 하위 (%d):" % len(avail))
+    for i in range(0, len(avail), 5):
+        print("      " + ", ".join(avail[i:i + 5]))
+    try:
+        print("    child_names: %s" % list(rd.child_names))
+    except Exception:
+        pass
+    # 실측: surface_areaavg / surface_massavg / flux 는 없음. 위 목록에서
+    # 실제 이름을 골라 쓸 것. 아래는 흔한 후보들.
     specs = [
-        ("dp_air", "surface_areaavg", {"field": "pressure",
-                                       "surface_names": ["air_inlet"]}),
-        ("t_air_out", "surface_massavg", {"field": "temperature",
-                                          "surface_names": ["air_outlet"]}),
-        ("m_air_in", "flux", {"zone_names": ["air_inlet"]}),
+        ("dp_air", ["surface", "surface_report", "area_weighted_avg"],
+         {"report_type": "surface-areaavg", "field": "pressure",
+          "surface_names": ["air_inlet"]}),
+        ("t_air_out", ["surface", "surface_report", "mass_weighted_avg"],
+         {"report_type": "surface-massavg", "field": "temperature",
+          "surface_names": ["air_outlet"]}),
+        ("m_air_in", ["flux", "mass_flow", "surface"],
+         {"report_type": "flux-massflow", "zone_names": ["air_inlet"]}),
     ]
-    for nm, kind, args in specs:
-        obj = getattr(rd, kind, None)
+    for nm, kinds, args in specs:
+        obj = None
+        for k in kinds:
+            obj = getattr(rd, k, None)
+            if obj is not None:
+                print("    %s -> rd.%s" % (nm, k))
+                break
         if obj is None:
-            print("    [--] %-16s (%s 없음)" % (nm, kind))
+            print("    [--] %-16s (%s 전부 없음)" % (nm, kinds))
             continue
         got, _ = try_all("리포트 %s (%s)" % (nm, kind), [
             ("create+set", lambda o=obj, n=nm, a=args: (
@@ -445,6 +463,9 @@ if ITER > 0:
                 print("    [--] %s (%s 없음)" % (label, path))
                 continue
             try_all(label, [(path, lambda o=o, a=args: o(*a))])
+    print("    ── 대조 ──")
+    print("    closure 예측 코어 dP = %.3f Pa" % DP_PRED)
+    print("    (위 입구압력 - 출구압력 과 비교. 오차가 크면 포러스 계수 확인)")
     step("13. 수렴 물리량", _converged)
 
     step("14. 데이터 저장",

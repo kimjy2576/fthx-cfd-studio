@@ -319,3 +319,48 @@ S.solution.initialization.hybrid_initialize()
 **기본값이 True (= physical velocity).** superficial 기준으로 산출한 C2 를
 쓰려면 반드시 False 로 꺼야 함. 켜두면 dP 가 1/gamma^2 = 1.156 배 어긋남.
 계획 단계에서 '압도적 1위 오류원' 으로 지목했던 항목이 실제로 켜져 있었음.
+
+
+---
+
+# M4 1차 — 반복 계산 성립 (2025 R1, 32 core)
+
+`ITER=50 STAGE=solve` 로 반복이 실제로 돌았음.
+
+```
+12. 반복 50 회
+    [OK] settings run_calculation.iterate
+```
+
+## 물리 검증 — closure 예측과 일치
+
+| | 값 |
+|---|---|
+| 공기 입구 압력 | 4.0985 Pa |
+| 공기 출구 압력 | -0.0011 Pa |
+| **CFD 코어 dP** | **4.10 Pa** |
+| **closure 예측** | **4.16 Pa** |
+| **오차** | **1.4%** |
+
+포러스 계수가 제대로 들어갔다는 직접 증거임.
+`relative_velocity_resistance_formulation` 을 끄지 않았다면
+1/gamma^2 = 1.156 배, 즉 15.6% 어긋났을 값임.
+
+공기 출구온도 297.53 K (입구 300.15 K) — 냉매(280.15 K)로 열이 빠져나감.
+방향과 크기 모두 타당함.
+
+## 확정 API
+
+```python
+S.solution.run_calculation.iterate(iter_count=N)
+```
+
+반복 횟수는 `FTHX_ITER` 환경변수로 주입.
+
+## 미확정
+
+`report_definitions` 하위에 `surface_areaavg` / `surface_massavg` / `flux` 가
+없음. 면적분 직접 계산(`report.surface_integrals.*`)은 동작하므로 물리량은
+얻을 수 있으나, 수렴 감시용 리포트는 타입 이름 확정이 필요함.
+
+50회는 초기 과도구간이라 수렴 판정은 아직임.

@@ -12,8 +12,13 @@ if grep -q "SETUP 완료" "$LOG" 2>/dev/null; then
   sed -n '/7. 열 모델/,/<<</p' "$LOG" | grep -E "모드|h_eff|a_v|hv|단열"
   if grep -q "12. 반복" "$LOG" 2>/dev/null; then
     echo "--- 수렴 (M4) ---"
-    grep -E "iter *continuity|^ *[0-9]+ +[0-9.e+-]+ " "$LOG" | tail -6
-    sed -n '/13. 수렴 물리량/,/<<</p' "$LOG" | grep -E "\[OK\]|Area|Mass|Average|dp_air|t_air_out" | head -12
+    echo "  residual (마지막 5줄):"
+    grep -E "^ *[0-9]+ +[0-9]\.[0-9]{4}e[+-][0-9]{2}" "$LOG" | tail -5
+    echo "  물리량:"
+    sed -n '/13. 수렴 물리량/,/<<< OK   13/p' "$LOG" \
+      | grep -E "^ +[0-9-]+\.[0-9]|Net|Average|Weighted" | head -12
+    echo "  리포트 API (다음 라운드 확정용):"
+    sed -n '/11. 리포트 정의/,/<<< OK   11/p' "$LOG" | grep -E "하위:|\[--\]|\[OK\]|스키마" | head -8
   fi
   echo "--- 포러스 최종 상태 ---"
   grep -E "^    \[최종\]|^           " "$LOG" | head -8
