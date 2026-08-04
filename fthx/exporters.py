@@ -981,32 +981,59 @@ def _thermal():
             ("energy.nsource = 1",
              lambda o=obj: o.sources.set_state({{"energy": {{"nsource": 1}}}})),
         ])
-        try:
-            st2 = obj.sources.get_state()
-            print("    [스키마2] sources(슬롯 확보 후): %s" % str(st2)[:400])
-            en = st2.get("energy")
-            if isinstance(en, dict):
-                print("      energy 키: %s" % sorted(en))
-        except Exception:
-            pass
-        try:
-            ec = obj.sources.energy
-            print("      energy 하위: %s"
-                  % [x for x in dir(ec) if not x.startswith("_")][:20])
-        except Exception:
-            pass
+        # 진단은 예외를 삼키지 않음 — 실패 사실 자체가 정보임
+        # (실측: try/except pass 로 감싸 [스키마2] 가 통째로 사라졌음)
+        def _dump_energy(o=obj, zone=n):
+            print("    --- sources 구조 (%s) ---" % zone)
+            for label, fn in (
+                    ("sources.get_state()", lambda: o.sources.get_state()),
+                    ("sources.energy", lambda: o.sources.energy),
+                    ("sources.energy.get_state()",
+                     lambda: o.sources.energy.get_state()),
+                    ("sources.energy.child_names",
+                     lambda: list(o.sources.energy.child_names)),
+                    ("dir(sources.energy)",
+                     lambda: [x for x in dir(o.sources.energy)
+                              if not x.startswith("_")]),
+                    ("list(sources.energy)", lambda: list(o.sources.energy)),
+                    ("sources.energy[0]", lambda: o.sources.energy[0]),
+                    ("sources.energy[1]", lambda: o.sources.energy[1]),
+                    ("sources.energy['1']", lambda: o.sources.energy["1"]),
+            ):
+                try:
+                    print("      %-30s %s" % (label, str(fn())[:260]))
+                except Exception as ex:
+                    print("      %-30s !! %s: %s"
+                          % (label, type(ex).__name__, str(ex)[:90]))
+        step("7b. sources 구조 (%s)" % n, _dump_energy)
+
+        EXPR = "hx_source"
         try_all("에너지 소스 값 %s" % n, [
-            ("energy.source_terms expression",
+            # 위 7b 덤프에서 실제 키가 나오면 그것으로 고정할 것
+            ("energy.1.set_state(expression)",
+             lambda o=obj: o.sources.energy["1"].set_state(
+                 {{"option": "expression", "expression": EXPR}})),
+            ("energy[1].set_state(expression)",
+             lambda o=obj: o.sources.energy[1].set_state(
+                 {{"option": "expression", "expression": EXPR}})),
+            ("energy.1 = expr 문자열",
+             lambda o=obj: o.sources.energy["1"].set_state(EXPR)),
+            ("sources.set_state(energy.1)",
              lambda o=obj: o.sources.set_state({{"energy": {{
                  "nsource": 1,
-                 "source_terms": [{{"option": "expression",
-                                   "expression": "hx_source"}}]}}}})),
-            ("energy[0] = expression",
-             lambda o=obj: o.sources.energy.__setitem__(
-                 0, {{"option": "expression", "expression": "hx_source"}})),
-            ("energy.source_terms 단순",
+                 "1": {{"option": "expression", "expression": EXPR}}}}}})),
+            ("sources.set_state(energy.source)",
              lambda o=obj: o.sources.set_state({{"energy": {{
-                 "nsource": 1, "source_terms": ["hx_source"]}}}})),
+                 "nsource": 1,
+                 "source": [{{"option": "expression",
+                             "expression": EXPR}}]}}}})),
+        ])
+        # TUI 폴백 — 설정 객체가 계속 안 맞으면 이쪽
+        try_all("TUI 소스항 %s" % n, [
+            ("define.boundary_conditions.fluid",
+             lambda z=n: TUI().define.boundary_conditions.fluid(
+                 z, "yes", "no", "no", "no", "no", "no", "yes", "1",
+                 "yes", "yes", EXPR, "no", "no", "no", "no")),
         ])
         try:
             print("    [확인] %s" % str(obj.sources.get_state())[:220])
