@@ -379,3 +379,6 @@ p.to_ft_spec()
 ## 라이선스
 
 MIT
+
+
+> **OpenFOAM 경로는 별도 레포로 분리됨:** https://github.com/kimjy2576/fthx-openfoam (이 레포를 core submodule 로 참조)
