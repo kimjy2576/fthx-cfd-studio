@@ -1144,3 +1144,57 @@ def test_journal_writes_results_csv():
     assert "results.csv" in j
     assert 'CASE_NAME = "probe_small"' in j
     assert "14. results.csv" in j
+
+
+# ─────────────────── 주기 단위셀 (핀 실형상) ───────────────────
+def test_cell_geometry_symmetry_planes(p):
+    """staggered 는 인접 열이 Pt/2 엇갈리므로 y=0 과 y=Pt/2 가 모두 관 중심"""
+    from fthx import cell
+    g = cell.cell_geometry(p)
+    assert g["Ly"] == pytest.approx(p.tube.Pt / 2)
+    assert g["Lz"] == pytest.approx(p.fin.Fp / 2)
+    cs = cell.tube_centers(p, g)
+    assert len(cs) == p.tube.Nr
+    ys = [y for _r, _x, y in cs]
+    if p.tube.layout == "staggered":
+        assert set(round(y, 6) for y in ys) == {0.0, round(p.tube.Pt / 2, 6)}
+
+
+@needs_cad
+def test_cell_bodies_and_no_overlap(p):
+    from fthx import cell, cad as CAD
+    assy, m = cell.build(p, include_ref=True)
+    B = {c.name: c.obj for c in assy.children}
+    assert "solid_fin" in B
+    assert sum(1 for k in B if k.startswith("solid_tube_")) == p.tube.Nr
+    assert sum(1 for k in B if k.startswith("fluid_cell_")) == 3
+    assert CAD.check_overlap(assy) == []
+    # 핀은 두께 반쪽만 (z = 0 ~ t_f/2)
+    bb = B["solid_fin"].BoundingBox()
+    assert bb.zmin == pytest.approx(0.0, abs=1e-9)
+    assert bb.zmax == pytest.approx(p.fin.t_f / 2, abs=1e-9)
+
+
+@needs_cad
+def test_cell_fin_area_matches_analytic(p):
+    """핀 노출면(위쪽) = 판넓이 - 관구멍(반쪽 4개)"""
+    from fthx import cell
+    g = cell.cell_geometry(p)
+    assy, _ = cell.build(p)
+    fin = {c.name: c.obj for c in assy.children}["solid_fin"]
+    Dc = p.tube.Do + 2 * p.fin.t_f
+    top = sum(f.Area() for f in fin.Faces()
+              if abs(f.normalAt(f.Center()).z) > 0.99
+              and abs(f.Center().z - g["t_f_half"]) < 1e-9)
+    W = g["x_core"][1] - g["x_core"][0]
+    expect = W * g["Ly"] - p.tube.Nr * 0.5 * math.pi * Dc ** 2 / 4
+    assert top == pytest.approx(expect, rel=1e-9)
+
+
+@needs_cad
+def test_cell_export(p, tmp_path):
+    from fthx import cell
+    m = cell.export(p, outdir=str(tmp_path))
+    assert m["mode"] == "periodic_cell"
+    assert set(m["face_seeds"]) == {"cell_inlet", "cell_outlet",
+                                    "sym_y0", "sym_y1", "sym_z1"}
