@@ -978,7 +978,8 @@ class TestFoamCase:
     def test_tutorial_case_files(self, tmp_path):
         from fthx import presets
         from fthx.openfoam import write_case
-        pl = write_case(presets.tutorial(), str(tmp_path / "c"), force=True)
+        pl = write_case(presets.tutorial(), str(tmp_path / "c"), force=True,
+                        mode="cht")
         c = tmp_path / "c"
         for f in ("system/blockMeshDict", "system/snappyHexMeshDict",
                   "system/surfaceFeatureExtractDict", "system/controlDict",
@@ -999,7 +1000,7 @@ class TestFoamCase:
         from fthx.openfoam import write_case
         from fthx.foam_stl import read_stl
         write_case(presets.tutorial(), str(tmp_path / "c"), force=True)
-        tris = read_stl(tmp_path / "c/constant/triSurface/fluid_ref_r01t01.stl")
+        tris = read_stl(tmp_path / "c/constant/triSurface/fluid_air_core_r01.stl")
         assert tris.max() < 1.0                         # 100mm → 0.1m
         snap = (tmp_path / "c/system/snappyHexMeshDict").read_text("utf-8")
         loc = [float(x) for x in
@@ -1276,3 +1277,26 @@ def test_cell_air_sits_above_fin():
         bb = B[k].BoundingBox()
         assert bb.zmin == pytest.approx(g["t_f_half"], abs=1e-6)
         assert bb.zmax == pytest.approx(g["Lz"], abs=1e-6)
+    def test_air_mode_physics(self, tmp_path):
+        """F3: air 모드 — ref 제외·관=wall patch·물리 파일·포러스 계수 매핑"""
+        from fthx import presets, closure
+        from fthx.openfoam import write_case, porous_df
+        p = presets.tutorial()
+        pl = write_case(p, str(tmp_path / "a"), force=True)   # 기본 mode=air
+        assert set(pl["zones"]) == {"fluid_air_core_r01"}
+        assert set(pl["surfaces"]) == {"solid_tube_r01t01"}
+        c = tmp_path / "a"
+        assert not (c / "constant/triSurface/fluid_ref_r01t01.stl").exists()
+        for f in ("0/U", "0/p", "0/k", "0/epsilon", "0/nut",
+                  "constant/transportProperties", "system/fvOptions",
+                  "Allrun.solve"):
+            assert (c / f).exists(), f
+        # Fluent↔OpenFOAM 계수 매핑: d=1/alpha, f=C2 (변환계수 없음)
+        pf = porous_df(p)
+        a = closure.air_side(p)
+        assert abs(pf["d"] * a["alpha_m2"] - 1.0) < 1e-9
+        assert pf["f"] == a["C2_1perm"]
+        fv = (c / "system/fvOptions").read_text("utf-8")
+        assert "DarcyForchheimer" in fv and "fluid_air_core_r01" in fv
+        u = (c / "0/U").read_text("utf-8")
+        assert f"({p.operating.air.V_face} 0 0)" in u

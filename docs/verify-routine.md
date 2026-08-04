@@ -19,6 +19,7 @@ cd /mnt/c/Users/kimjy/dev/fthx-cfd-studio && bash scripts/check.sh
 2. STL 생성 + surfaceCheck 교차검증
 3. tutorial 케이스 생성
 4. `~/cases/case_tutorial` 로 복사 → 메싱 → checkMesh → cellZone 검산
+5. simpleFoam(8코어) → ΔP 추출 (건너뛰려면 FTHX_SOLVE=0)
 
 실패하면 해당 로그의 마지막 30줄을 자동으로 출력하고 멈춤 — 그 출력을
 그대로 회신하면 됨. 끝까지 가면 `ALL OK` — 그 출력 전체를 회신.

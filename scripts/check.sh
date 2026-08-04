@@ -72,6 +72,16 @@ if grep -E "^  [a-z_0-9]+: 0$" /tmp/fthx_mesh.log; then
     die "cellZone 셀 수 0 — 존 형성 실패" "$CASE/log.snappyHexMesh"
 fi
 
+step "5/5 솔버 (simpleFoam, FTHX_NP=${FTHX_NP:-8}코어) — 수 분 소요"
+if [ "${FTHX_SOLVE:-1}" = "1" ]; then
+    if ! ( cd "$CASE" && ./Allrun.solve ) | tee /tmp/fthx_solve.log; then
+        die "솔버 실패" "$CASE/log.simpleFoam"
+    fi
+    grep -E "ΔP" /tmp/fthx_solve.log
+else
+    echo "(건너뜀 — FTHX_SOLVE=0)"
+fi
+
 echo
 echo "══════════════════════════════════"
 echo " ALL OK — 이 출력 전체를 복사해 회신"

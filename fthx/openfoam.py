@@ -134,24 +134,31 @@ def _feature_dict(stl_names: list[str]) -> str:
     return _hdr("surfaceFeatureExtractDict") + body
 
 
-def _snappy_dict(p: FTHXParams, pl: dict, zones: dict[str, int]) -> str:
+def _snappy_dict(p: FTHXParams, pl: dict, entries: dict[str, dict]) -> str:
+    """entries: {stl이름: {"level": int, "zone": bool}}.
+    zone=True → cellZone(내부 유지), zone=False → 경계면(내부 셀 제거, wall patch)"""
     d, dk = p.domain, p.duct_box
     x0 = p.core_bbox[0]
-    # 공기 내부 점 = 상류 박스 중심 (셀 면과 겹치지 않게 미세 오프셋)
     loc = tuple(v / 1000.0 for v in (         # [m] — STL·메시와 단위 일치
         (x0 - d.L_up + x0) / 2 + 0.0123,
         (dk["y0"] + dk["y1"]) / 2 + 0.0231,
         (dk["z0"] + dk["z1"]) / 2 + 0.0312))
     geom, feat, surf = "", "", ""
-    for name, lv in zones.items():
+    for name, e in entries.items():
+        lv = e["level"]
         geom += f'    {name}.stl {{ type triSurfaceMesh; name {name}; }}\n'
         feat += f'    {{ file "{name}.eMesh"; level {lv}; }}\n'
-        surf += (f"        {name}\n        {{\n"
-                 f"            level ({lv} {lv});\n"
-                 f"            faceZone {name};\n"
-                 f"            cellZone {name};\n"
-                 f"            cellZoneInside inside;\n        }}\n")
-    core = next(n for n in zones if n.startswith("fluid_air_core"))
+        if e["zone"]:
+            surf += (f"        {name}\n        {{\n"
+                     f"            level ({lv} {lv});\n"
+                     f"            faceZone {name};\n"
+                     f"            cellZone {name};\n"
+                     f"            cellZoneInside inside;\n        }}\n")
+        else:
+            surf += (f"        {name}\n        {{\n"
+                     f"            level ({lv} {lv});\n"
+                     f"            patchInfo {{ type wall; }}\n        }}\n")
+    core = next(n for n in entries if n.startswith("fluid_air_core"))
     return _hdr("snappyHexMeshDict") + f"""
 castellatedMesh true;
 snap            true;
@@ -282,8 +289,14 @@ grep -E "Mesh OK|Failed .* mesh checks" log.checkMesh
 """
 
 
-def write_case(p: FTHXParams, case_dir: str, force: bool = False) -> dict:
-    """tutorial 급 형상의 snappy 케이스 생성. 반환: plan + 파일 목록."""
+def write_case(p: FTHXParams, case_dir: str, force: bool = False,
+               mode: str = "air") -> dict:
+    """tutorial 급 형상의 snappy 케이스 생성. 반환: plan + 파일 목록.
+
+    mode="air": 공기측 단일 region — fluid_ref 제외, 관 표면=wall patch.
+               물리 설정(0/, constant/, fvOptions, Allrun.solve)까지 생성.
+    mode="cht": 전 바디 cellZone (A-lite) — 메시만. conjugate 는 Phase 3 후반.
+    """
     d = p.domain
     if d.include_bends:
         raise NotImplementedError(
@@ -309,37 +322,47 @@ def write_case(p: FTHXParams, case_dir: str, force: bool = False) -> dict:
     shutil.rmtree(case / "_stl_tmp")
 
     pl = plan(p)
-    zones = {}
+    entries: dict[str, dict] = {}
+    drop: list[str] = []
     for n in sorted(stl_names):
         if n.startswith("fluid_air_core"):
-            zones[n] = pl["lv_core"]
+            entries[n] = {"level": pl["lv_core"], "zone": True}
         elif n.startswith("solid_tube"):
-            zones[n] = pl["lv_wall"]
+            if mode == "cht":       # A-lite: 관벽을 실제 셀존으로
+                entries[n] = {"level": pl["lv_wall"], "zone": True}
+            else:                   # air: 관 표면 = wall patch, 내부 셀 제거
+                entries[n] = {"level": pl["lv_ref"], "zone": False}
         elif n.startswith("fluid_ref"):
-            zones[n] = pl["lv_ref"]
+            if mode == "cht":
+                entries[n] = {"level": pl["lv_ref"], "zone": True}
+            else:
+                drop.append(n)      # 공기측 해석에는 냉매 도메인 불필요
         elif n.startswith("fluid_air_"):
-            continue          # 상·하류는 배경 그대로 = 별도 존 불필요 (공기 연속체)
+            drop.append(n)          # 상·하류는 배경 그대로 (공기 연속체)
         else:
-            zones[n] = pl["lv_ref"]
+            entries[n] = {"level": pl["lv_ref"], "zone": mode == "cht"}
 
     (case / "system" / "blockMeshDict").write_text(
         _block_mesh_dict(p, pl), encoding="utf-8", newline="\n")
     (case / "system" / "snappyHexMeshDict").write_text(
-        _snappy_dict(p, pl, zones), encoding="utf-8", newline="\n")
+        _snappy_dict(p, pl, entries), encoding="utf-8", newline="\n")
     (case / "system" / "surfaceFeatureExtractDict").write_text(
-        _feature_dict(sorted(zones)), encoding="utf-8", newline="\n")
+        _feature_dict(sorted(entries)), encoding="utf-8", newline="\n")
     for name, body in _MINI.items():
         (case / "system" / name).write_text(_hdr(name) + body, encoding="utf-8", newline="\n")
     ar = case / "Allrun.mesh"
     ar.write_text(_ALLRUN, encoding="utf-8", newline="\n")
     ar.chmod(0o755)
 
-    # 상·하류 STL 은 triSurface 에서 제거 — 존으로 안 쓰므로 혼동 방지
-    for n in stl_names:
-        if n.startswith("fluid_air_up") or n.startswith("fluid_air_down"):
-            (case / "constant" / "triSurface" / f"{n}.stl").unlink()
+    # 사용하지 않는 STL 은 triSurface 에서 제거 (혼동 방지)
+    for n in drop:
+        (case / "constant" / "triSurface" / f"{n}.stl").unlink()
 
-    pl["zones"] = zones
+    pl["zones"] = {n: e["level"] for n, e in entries.items() if e["zone"]}
+    pl["surfaces"] = {n: e["level"] for n, e in entries.items() if not e["zone"]}
+    pl["mode"] = mode
+    if mode == "air":
+        pl["physics"] = write_physics(p, case)
     pl["case_dir"] = str(case)
     pl["gate"] = {
         "fluent_ref_cells": 68641,
@@ -347,3 +370,245 @@ def write_case(p: FTHXParams, case_dir: str, force: bool = False) -> dict:
                 "관벽 level 상향(A-lite)으로 증가는 예상된 것",
     }
     return pl
+
+
+# ══════════════════════════════════════════════════════════════════
+#  F3 — 물리 설정 (공기측 단일 region · simpleFoam · 포러스 fvOptions)
+# ══════════════════════════════════════════════════════════════════
+def porous_df(p: FTHXParams) -> dict:
+    """closure.air_side() 의 Fluent 형 계수를 OpenFOAM DarcyForchheimer 로.
+
+    Fluent:   dp/L = (mu/alpha)·u + C2·(rho/2)·u²   (superficial u)
+    OpenFOAM: dp/L =  mu·d·u     + f·(rho/2)·u²
+    →  d = 1/alpha [1/m²],  f = C2 [1/m]   (직접 대응, 변환계수 없음)
+
+    핀은 z(적층 방향) 유동을 막음 → 횡방향 z 는 ×1e3 저항 (관행값).
+    y 는 핀 채널 안에서 자유 → x 와 동일로 근사.
+    """
+    from . import closure
+    a = closure.air_side(p)
+    od = p.operating_derived()["air"]
+    d1 = 1.0 / a["alpha_m2"] if a["alpha_m2"] else 0.0
+    return {"d": d1, "f": a["C2_1perm"], "block_factor": 1e3,
+            "dp_core_Pa": a["dp_core_Pa"], "porosity": a["porosity"],
+            "rho": od["rho"], "mu": od["mu"], "nu": od["mu"] / od["rho"],
+            "U_face": p.operating.air.V_face}
+
+
+def write_physics(p: FTHXParams, case: Path) -> dict:
+    """0/ · constant/ · fvOptions · 솔버용 system · Allrun.solve 생성."""
+    pf = porous_df(p)
+    U, nu, rho = pf["U_face"], pf["nu"], pf["rho"]
+    dk = p.duct_box
+    H = (dk["y1"] - dk["y0"]) / 1000.0                # 덕트 높이 [m]
+    I, L = 0.05, 0.1 * H                              # 난류강도 5%, 길이척도 0.1H
+    k_in = 1.5 * (I * U) ** 2
+    eps_in = 0.09 ** 0.75 * k_in ** 1.5 / L
+    core = f"fluid_air_core_r{1:02d}"                 # tutorial: r01 하나
+
+    def w(rel: str, body: str, obj: str | None = None):
+        f = case / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        hdr = _hdr(obj or f.name)
+        f.write_text(hdr + body, encoding="utf-8", newline="\n")
+
+    wall_re = '"(duct_wall|solid_tube.*)"'
+    w("0/U", f"""
+dimensions [0 1 -1 0 0 0 0];
+internalField uniform ({U} 0 0);
+boundaryField
+{{
+    air_inlet  {{ type fixedValue; value uniform ({U} 0 0); }}
+    air_outlet {{ type zeroGradient; }}
+    {wall_re}  {{ type noSlip; }}
+}}
+""")
+    w("0/p", """
+dimensions [0 2 -2 0 0 0 0];
+internalField uniform 0;
+boundaryField
+{
+    air_inlet  { type zeroGradient; }
+    air_outlet { type fixedValue; value uniform 0; }
+    """ + wall_re + """ { type zeroGradient; }
+}
+""")
+    w("0/k", f"""
+dimensions [0 2 -2 0 0 0 0];
+internalField uniform {k_in:.6g};
+boundaryField
+{{
+    air_inlet  {{ type fixedValue; value uniform {k_in:.6g}; }}
+    air_outlet {{ type zeroGradient; }}
+    {wall_re}  {{ type kqRWallFunction; value uniform {k_in:.6g}; }}
+}}
+""")
+    w("0/epsilon", f"""
+dimensions [0 2 -3 0 0 0 0];
+internalField uniform {eps_in:.6g};
+boundaryField
+{{
+    air_inlet  {{ type fixedValue; value uniform {eps_in:.6g}; }}
+    air_outlet {{ type zeroGradient; }}
+    {wall_re}  {{ type epsilonWallFunction; value uniform {eps_in:.6g}; }}
+}}
+""")
+    w("0/nut", f"""
+dimensions [0 2 -1 0 0 0 0];
+internalField uniform 0;
+boundaryField
+{{
+    air_inlet  {{ type calculated; value uniform 0; }}
+    air_outlet {{ type calculated; value uniform 0; }}
+    {wall_re}  {{ type nutkWallFunction; value uniform 0; }}
+}}
+""")
+    w("constant/transportProperties",
+      f"\ntransportModel Newtonian;\nnu {nu:.6e};\n")
+    w("constant/turbulenceProperties", """
+simulationType RAS;
+RAS { RASModel kEpsilon; turbulence on; printCoeffs off; }
+""")
+    w("system/fvOptions", f"""
+porousCore
+{{
+    type            explicitPorositySource;
+    active          yes;
+    explicitPorositySourceCoeffs
+    {{
+        selectionMode   cellZone;
+        cellZone        {core};
+        type            DarcyForchheimer;
+        d   ({pf['d']:.6e} {pf['d']:.6e} {pf['d'] * pf['block_factor']:.6e});
+        f   ({pf['f']:.6f} {pf['f']:.6f} {pf['f'] * pf['block_factor']:.6f});
+        coordinateSystem
+        {{
+            origin (0 0 0);
+            rotation {{ type axesRotation; e1 (1 0 0); e2 (0 1 0); }}
+        }}
+    }}
+}}
+""")
+    w("system/fvSchemes", """
+ddtSchemes      { default steadyState; }
+gradSchemes     { default cellLimited Gauss linear 1; }
+divSchemes
+{
+    default                     none;
+    div(phi,U)                  bounded Gauss linearUpwind grad(U);
+    div(phi,k)                  bounded Gauss upwind;
+    div(phi,epsilon)            bounded Gauss upwind;
+    div((nuEff*dev2(T(grad(U))))) Gauss linear;
+}
+laplacianSchemes { default Gauss linear limited corrected 0.33; }
+interpolationSchemes { default linear; }
+snGradSchemes   { default limited corrected 0.33; }
+wallDist        { method meshWave; }
+""", obj="fvSchemes")
+    w("system/fvSolution", """
+solvers
+{
+    p       { solver GAMG; smoother GaussSeidel; tolerance 1e-7; relTol 0.01; }
+    "(U|k|epsilon)" { solver smoothSolver; smoother symGaussSeidel;
+                      tolerance 1e-8; relTol 0.1; }
+}
+SIMPLE
+{
+    nNonOrthogonalCorrectors 1;
+    consistent no;
+    residualControl { p 1e-4; U 1e-5; "(k|epsilon)" 1e-5; }
+}
+relaxationFactors
+{
+    fields    { p 0.3; }
+    equations { U 0.7; "(k|epsilon)" 0.7; }
+}
+""", obj="fvSolution")
+    w("system/controlDict", """
+application     simpleFoam;
+startFrom       latestTime;
+startTime       0;
+stopAt          endTime;
+endTime         2000;
+deltaT          1;
+writeControl    timeStep;
+writeInterval   500;
+purgeWrite      2;
+functions
+{
+    pIn
+    {
+        type            surfaceFieldValue;
+        libs            (fieldFunctionObjects);
+        regionType      patch;
+        name            air_inlet;
+        operation       areaAverage;
+        fields          (p);
+        writeFields     no;
+        writeControl    timeStep;
+        writeInterval   20;
+        log             no;
+    }
+    pOut
+    {
+        type            surfaceFieldValue;
+        libs            (fieldFunctionObjects);
+        regionType      patch;
+        name            air_outlet;
+        operation       areaAverage;
+        fields          (p);
+        writeFields     no;
+        writeControl    timeStep;
+        writeInterval   20;
+        log             no;
+    }
+}
+""", obj="controlDict")
+    w("system/decomposeParDict", """
+numberOfSubdomains 8;
+method scotch;
+""")
+    allrun = r"""#!/usr/bin/env bash
+# 솔버 실행 + ΔP 추출.  코어 수: FTHX_NP (기본 8, nproc 상한)
+cd "$(dirname "$0")"
+if ! command -v simpleFoam >/dev/null 2>&1; then
+    for rc in /usr/lib/openfoam/openfoam*/etc/bashrc; do
+        [ -f "$rc" ] && source "$rc" && break
+    done
+fi
+set -e
+run() { echo ">>> $1"; "${@}" > "log.$1" 2>&1 || { echo "<<< $1 실패 — log.$1"; exit 1; }; echo "<<< $1 OK"; }
+
+NP=${FTHX_NP:-8}
+AVAIL=$(nproc)
+[ "$NP" -gt "$AVAIL" ] && NP=$AVAIL
+if [ "$NP" -gt 1 ] && command -v mpirun >/dev/null 2>&1; then
+    sed -i "s/^numberOfSubdomains.*/numberOfSubdomains $NP;/" system/decomposeParDict
+    run decomposePar -force
+    echo ">>> simpleFoam (${NP}코어)"
+    mpirun -np "$NP" simpleFoam -parallel > log.simpleFoam 2>&1 \
+        || { echo "<<< simpleFoam 실패 — log.simpleFoam"; exit 1; }
+    echo "<<< simpleFoam OK"
+    run reconstructPar -latestTime
+else
+    echo ">>> simpleFoam (직렬)"
+    simpleFoam > log.simpleFoam 2>&1 \
+        || { echo "<<< simpleFoam 실패 — log.simpleFoam"; exit 1; }
+    echo "<<< simpleFoam OK"
+fi
+
+# 재시작하면 postProcessing/<fn>/<시작시각>/ 이 여럿 생김 — 최신 것을 읽음
+latest() { ls "postProcessing/$1" | sort -n | tail -1; }
+PIN=$(tail -1 "postProcessing/pIn/$(latest pIn)/surfaceFieldValue.dat" | awk '{print $2}')
+POUT=$(tail -1 "postProcessing/pOut/$(latest pOut)/surfaceFieldValue.dat" | awk '{print $2}')
+grep -E "SIMPLE solution converged|end time" log.simpleFoam | tail -1 || true
+awk -v a="$PIN" -v b="$POUT" -v r="__RHO__" 'BEGIN{
+    printf "ΔP_CFD  = %.3f Pa  (kinematic %.4f m2/s2 x rho %.4f)\n", (a-b)*r, a-b, r}'
+echo "ΔP_core(해석해, Fluent 와 동일 상관식) = __DPREF__ Pa — CFD 는 덕트·관 항력만큼 이보다 커야 함"
+"""
+    allrun = allrun.replace("__RHO__", f"{rho:.4f}")
+    allrun = allrun.replace("__DPREF__", f"{pf['dp_core_Pa']:.3f}")
+    ar = case / "Allrun.solve"
+    ar.write_text(allrun, encoding="utf-8", newline="\n")
+    ar.chmod(0o755)
+    return {k: pf[k] for k in ("d", "f", "dp_core_Pa", "nu", "rho", "U_face")}
