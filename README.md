@@ -29,7 +29,9 @@
 
 ---
 
-> **새로 합류했다면** [`docs/HANDOFF.md`](docs/HANDOFF.md) 부터 읽을 것 —
+> **새로 합류했다면** [`docs/HANDOFF_v2.md`](docs/HANDOFF_v2.md) 부터 읽을 것
+> (Fluent 경로 M0~M5 완료 · 주기 단위셀 착수 지점).
+> OpenFOAM 경로는 [`docs/HANDOFF.md`](docs/HANDOFF.md) —
 > 프로젝트 전제, 현재 상태, Fluent 경로에서 배운 함정, OpenFOAM 착수 지점이
 > 정리되어 있음.
 

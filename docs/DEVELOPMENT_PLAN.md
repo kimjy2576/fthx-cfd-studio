@@ -188,7 +188,8 @@ geom/mesh 를 건너뛰고 setup 부터 돎. 메시 30분 걸린 걸 BC 오타�
 | ~~M2~~ | ~~LABEL~~ | **✅ 완료 — 미매칭 0** |
 | ~~M3~~ | ~~SETUP~~ | **✅ 완료 — GUI 입력 0건** |
 | ~~M4~~ | ~~SOLVE~~ | **✅ 완료 — dP 오차 0.03%** |
-| M5 | POST → CSV → HPWD-DataManager | 기존 대시보드에 그대로 |
+| ~~M5~~ | ~~POST~~ | **✅ 완료** |
+| M5b | ~~POST → CSV → HPWD-DataManager~~ | 기존 대시보드에 그대로 |
 | M6 | 배치 큐 + `envelope.yaml` 강제 | 야간 20케이스 |
 | M7 | HX-Sim ft_spec 회로 확장 (5단계) | 1D·CFD 가 같은 회로 정의 공유 |
 | M8 | `reduced_resolved` / `periodic_cell` 도메인 모드 | B vs C 폐합 오차 확인 |
