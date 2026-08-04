@@ -260,6 +260,7 @@ canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%}
     <div class="seg hseg" id="tutSeg">
       <button data-preset="tutorial" title="관 1개 · 5 바디 — STEP+저널+실행법 zip">관 1개</button>
       <button data-preset="probe" title="관 3개 + 벤드 2개 · 13 바디 — STEP+저널+실행법 zip">관 3개</button>
+      <button data-preset="cell" title="주기 단일셀 · 핀 실형상 · 6 바디">단일셀</button>
     </div></div>
   <button class="act" id="btnPkg" title="현재 설계 화면 기준 — STEP + Fluent 저널 + 실행법 zip">해석 패키지 (현재 설계)</button>
   <button class="act" id="btnUpd" title="확인 중…">앱 업데이트</button>
@@ -486,6 +487,67 @@ function cellEstimate(){
   const ext=rows.filter(r=>r.zone==="up"||r.zone==="down")
                 .reduce((a,r)=>a+r.cells,0);
   return {rows,total:tot,low:lo,high:hi,sizing:s,ext_frac:ext/tot};
+}
+
+/* ── 단일셀 미리보기 ─────────────────────────────────────────
+   z 가 0.9mm 인데 x 가 176mm 라 실축척이면 종잇장으로 보임.
+   형상 판별이 목적이므로 z 를 과장해서 그림 (배율을 화면에 표시) */
+let CELLGEO=null, CELL_ZX=1, CELL_MODE=false;
+function drawCell(g, zx){
+  CELL_MODE = true;
+  // 코어 폭 대비 z 를 1/3 정도로 키워야 형상이 보임 (실축척이면 종잇장)
+  const coreW = g.core_x[1]-g.core_x[0];
+  CELL_ZX = zx || Math.max(4, Math.round(coreW/3/(g.box.z[1]-g.box.z[0])));
+  Object.values(G).forEach(gr=>{ while(gr.children.length) gr.remove(gr.children[0]); });
+  const S=CELL_ZX, Z=(v)=>v*S;
+  const bx=g.box, Lx=bx.x[1], Ly=bx.y[1], Lz=bx.z[1];
+  const mAir=new THREE.MeshStandardMaterial({color:0x8ec5f0,transparent:true,
+    opacity:0.22,side:THREE.DoubleSide,depthWrite:false});
+  const mFin=new THREE.MeshStandardMaterial({color:0xd8d8de,metalness:0.3,roughness:0.6});
+  const mTub=new THREE.MeshStandardMaterial({color:0xcc8033,metalness:0.4,roughness:0.5});
+
+  // 코어 구간만 그림 — 상·하류는 x 가 너무 길어 형상 판별을 방해함
+  const cx0=g.core_x[0], cx1=g.core_x[1], mgn=(cx1-cx0)*0.25;
+  const vx0=cx0-mgn, vx1=cx1+mgn;
+
+  // 공기 (핀 위 간극)
+  const az0=g.air_z[0], az1=g.air_z[1];
+  const air=new THREE.Mesh(new THREE.BoxGeometry(vx1-vx0,Ly,Z(az1-az0)),mAir);
+  air.position.set((vx0+vx1)/2,Ly/2,Z((az0+az1)/2)); G.air.add(air);
+  const fin=new THREE.Mesh(new THREE.BoxGeometry(cx1-cx0,Ly,Z(g.fin_z[1])),mFin);
+  fin.position.set((cx0+cx1)/2,Ly/2,Z(g.fin_z[1]/2)); G.fin.add(fin);
+
+  // 관 — 대칭면 위 반쪽
+  g.tubes.forEach(t=>{
+    const geo=new THREE.CylinderGeometry(g.Do/2,g.Do/2,Z(Lz),28,1,false,
+                                         -Math.PI/2, Math.PI);
+    geo.rotateX(Math.PI/2);
+    if(t.y>Ly/2) geo.rotateZ(Math.PI);      // y=Ly 면에 붙은 관은 반대로
+    const m=new THREE.Mesh(geo,mTub);
+    m.position.set(t.x,t.y,Z(Lz/2)); G.tube.add(m);
+    const col=new THREE.Mesh(new THREE.CylinderGeometry(g.Dc/2,g.Dc/2,Z(g.fin_z[1]),
+                                    28,1,false,-Math.PI/2,Math.PI),mFin);
+    col.rotateX(Math.PI/2); if(t.y>Ly/2) col.rotateZ(Math.PI);
+    col.position.set(t.x,t.y,Z(g.fin_z[1]/2)); G.fin.add(col);
+  });
+
+  // 대칭면 표시
+  const mSym=new THREE.MeshBasicMaterial({color:0x2f7fd6,transparent:true,
+    opacity:0.10,side:THREE.DoubleSide,depthWrite:false});
+  [[0],[Ly]].forEach(([v])=>{
+    const pl=new THREE.Mesh(new THREE.PlaneGeometry(vx1-vx0,Z(Lz)),mSym);
+    pl.rotateX(Math.PI/2); pl.position.set((vx0+vx1)/2,v,Z(Lz/2)); G.core.add(pl);
+  });
+  frameBox(vx0,vx1, 0,Ly, 0,Z(Lz));
+  const f=cellFlowText(g);
+  document.getElementById("zoneSummary").innerHTML =
+    `단일셀 ${fmt(Lx,0)} x ${fmt(Ly,2)} x ${fmt(Lz,3)} mm · `
+    + `<b>코어 구간만 · z 축 ${S}배 과장</b> · 추정 <b>${big(g.sizing.cells_est)}</b> 셀 · ${f}`;
+}
+function cellFlowText(g){
+  const fl=g.flow;
+  return `Re<sub>Dh</sub> ${fmt(fl.Re_Dh,0)} (<b>${fl.regime}</b>) · `
+       + `u<sub>max</sub> ${fmt(fl.u_max_ms,2)} m/s · 전열면적 ${fmt(g.area_m2*1e6,0)} mm²`;
 }
 
 /* ---------- 유동 도메인 자동 산정 ---------- */
@@ -988,6 +1050,7 @@ function boxMesh(x0,x1,y0,y1,z0,z1,mat,emat){
 }
 
 function rebuild(){
+  if(CELL_MODE){ return; }        // 단일셀 미리보기 중에는 풀사이즈를 그리지 않음
   reconcileCircuits();
   Object.values(G).forEach(clearGroup);
   const b=bbox(), C=centers(), d=derived(), xy=XY(), TZ0=tubeZ();
@@ -1108,6 +1171,18 @@ function frame(force){
   sph.r = Math.max(hy/tV, hx/tH)*1.10 + hz;
   if(force) userView=false;
   place();
+}
+function frameBox(x0,x1,y0,y1,z0,z1){
+  const c=new THREE.Vector3((x0+x1)/2,(y0+y1)/2,(z0+z1)/2);
+  const B=camBasis(); let hx=0,hy=0,hz=0,v=new THREE.Vector3();
+  for(const X of [x0,x1]) for(const Y of [y0,y1]) for(const Z of [z0,z1]){
+    v.set(X,Y,Z).sub(c);
+    hx=Math.max(hx,Math.abs(v.dot(B.x)));
+    hy=Math.max(hy,Math.abs(v.dot(B.y)));
+    hz=Math.max(hz,Math.abs(v.dot(B.z)));
+  }
+  const tV=Math.tan(camera.fov*Math.PI/360), tH=tV*Math.max(camera.aspect,.3);
+  target.copy(c); sph.r=Math.max(hy/tV,hx/tH)*1.15+hz; userView=false; place();
 }
 function place(){
   camera.position.set(
@@ -1382,7 +1457,14 @@ document.querySelectorAll("[data-preset]").forEach(b=>b.onclick=()=>{
    6. 구동
    ========================================================================= */
 let pending=null;
+function exitCell(){
+  if(!CELL_MODE) return;
+  CELL_MODE=false; CELLGEO=null;
+  Object.values(G).forEach(clearGroup);
+  rebuild(); frame(true); paint();
+}
 function refresh(geo){
+  if(CELL_MODE && geo!==undefined){ exitCell(); return; }
   if(validate().length===0 && geo){
     clearTimeout(pending); pending=setTimeout(()=>{rebuild();paint();},70);
   } else paint();
@@ -1470,6 +1552,27 @@ btnU.onclick=async()=>{
 /* ---- 튜토리얼 STEP 다운로드 ---- */
 document.querySelectorAll("#tutSeg button").forEach(b=>b.onclick=async()=>{
   const nm=b.dataset.preset, old=b.textContent;
+  if(nm==="cell"){                       // 단일셀은 먼저 형상을 보여줌
+    b.textContent="불러오는 중…"; b.disabled=true;
+    try{
+      const r=await fetch("/api/preset/cell/geometry");
+      if(!r.ok) throw new Error("HTTP "+r.status);
+      CELLGEO=await r.json(); drawCell(CELLGEO);
+      toast("단일셀 형상",
+        `<b>핀 실형상 · 포러스 없음</b><br>`
+        +`x ${fmt(CELLGEO.box.x[1],0)} · y ${fmt(CELLGEO.box.y[1],2)} (P<sub>t</sub>/2)`
+        +` · z ${fmt(CELLGEO.box.z[1],3)} (F<sub>p</sub>/2) mm<br>`
+        +`<span style="color:var(--dim)">네 측면 모두 대칭면 — 주기 경계 불필요.`
+        +` 관은 대칭면 위 반쪽.</span>`
+        +`<ul><li>${cellFlowText(CELLGEO)}</li>`
+        +`<li>추정 ${big(CELLGEO.sizing.cells_est)} 셀 ·`
+        +` h<sub>xy</sub> ${CELLGEO.sizing.h_xy_mm} / z ${CELLGEO.sizing.nz_gap}+${CELLGEO.sizing.nz_fin}층</li></ul>`
+        +`<button class="act" onclick="dlPreset('cell')">패키지 받기</button>`);
+    }catch(e){ toast("단일셀 형상 실패",
+        `로컬 서버 필요 — <code>run.bat</code><br>${e.message||e}`, true); }
+    finally{ b.textContent=old; b.disabled=false; }
+    return;
+  }
   b.textContent="생성 중…"; b.disabled=true;
   try{
     const r=await fetch(`/api/preset/${nm}/package`);
@@ -1535,6 +1638,18 @@ document.getElementById("btnPkg").onclick=async()=>{
       `로컬 서버에 연결되지 않음. <code>run.bat</code> 으로 띄울 것.`, true); }
   finally{ b.textContent=old; b.disabled=false; }
 };
+
+async function dlPreset(nm){
+  try{
+    const r=await fetch(`/api/preset/${nm}/package`);
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    save(await r.blob(), `${nm}_fluent.zip`);
+    toast("패키지 내려받음",
+      `<code>unzip ${nm}_fluent.zip</code><br>`
+      +`<code>cd examples/${nm} 또는 fthx_case</code><br>`
+      +`<code>./go.sh ${nm} 8</code>`);
+  }catch(e){ toast("패키지 실패", String(e.message||e), true); }
+}
 
 document.getElementById("btnCirc").onclick=ceOpen;
 document.getElementById("ceClose").onclick=ceClose;

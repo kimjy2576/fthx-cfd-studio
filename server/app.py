@@ -399,6 +399,39 @@ def preset_package(name: str):
     return FileResponse(out, media_type="application/zip", filename=out.name)
 
 
+@app.get("/api/preset/{name}/geometry")
+def preset_geometry(name: str):
+    """스튜디오 3D 미리보기용 형상 정보.
+       단일셀은 반쪽 관·핀 실형상이라 풀사이즈와 구조가 다름."""
+    from fthx import cell as CELL
+    if name == "cell":
+        p = presets.cell()
+        g = CELL.cell_geometry(p)
+        return {
+            "kind": "cell",
+            "name": p.name,
+            "box": {"x": [0.0, g["Lx"]], "y": [0.0, g["Ly"]],
+                    "z": [0.0, g["Lz"]]},
+            "core_x": list(g["x_core"]),
+            "fin_z": [0.0, g["t_f_half"]],
+            "air_z": [g["t_f_half"], g["Lz"]],
+            "tubes": [{"r": r, "x": x, "y": y} for r, x, y in
+                      CELL.tube_centers(p, g)],
+            "Do": p.tube.Do, "Di": p.tube.Di,
+            "Dc": p.tube.Do + 2 * p.fin.t_f,
+            "sizing": CELL.cell_sizing(p),
+            "flow": CELL.cell_flow(p),
+            "area_m2": CELL.heat_area_m2(p),
+        }
+    p = presets.PRESETS[name]() if name in presets.PRESETS else None
+    if p is None:
+        raise HTTPException(404, f"알 수 없는 프리셋: {name}")
+    cs = CQC.gen_single(p) if p.domain.include_bends else None
+    return {"kind": "full", "name": p.name,
+            "params": p.model_dump(), "derived": p.derived(),
+            "circuits": (cs.model_dump() if cs else None)}
+
+
 @app.get("/api/preset/{name}/meta")
 def preset_meta(name: str):
     from fthx import cad as CAD

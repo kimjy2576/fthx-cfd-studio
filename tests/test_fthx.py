@@ -1231,3 +1231,48 @@ def test_cell_journals_valid():
     assert "LAMINAR  = True" in js
     assert "symmetry" in js          # 대칭면 타입 변경
     assert "cell_results.csv" in js
+
+
+@needs_cad
+def test_cell_tubes_sit_on_symmetry_planes():
+    """staggered 단일셀: 관은 y=0 과 y=Pt/2 대칭면 위에 반쪽으로 놓여야 함.
+       반쪽 폭은 관 외경이 아니라 **칼라 외경** D_c/2 임 (칼라가 더 큼)."""
+    from fthx import presets, cell
+    p = presets.cell()
+    g = cell.cell_geometry(p)
+    B = {c.name: c.obj for c in cell.build(p)[0].children}
+    Dc = p.tube.Do + 2 * p.fin.t_f
+    Ly = g["Ly"]
+    for k in ("solid_tube_r01", "solid_tube_r02"):
+        bb = B[k].BoundingBox()
+        assert bb.ylen == pytest.approx(Dc / 2, abs=1e-3)
+        on0 = abs(bb.ymin) < 1e-6
+        on1 = abs(bb.ymax - Ly) < 1e-6
+        assert on0 or on1, f"{k} 가 대칭면 위에 없음"
+    # 두 관은 서로 반대 대칭면에 있어야 staggered 가 재현됨
+    b1, b2 = B["solid_tube_r01"].BoundingBox(), B["solid_tube_r02"].BoundingBox()
+    assert abs(b1.ymin) < 1e-6 and abs(b2.ymax - Ly) < 1e-6
+
+
+@needs_cad
+def test_cell_fin_volume_analytic():
+    from fthx import presets, cell
+    p = presets.cell()
+    g = cell.cell_geometry(p)
+    fin = {c.name: c.obj for c in cell.build(p)[0].children}["solid_fin"]
+    Dc = p.tube.Do + 2 * p.fin.t_f
+    W = g["x_core"][1] - g["x_core"][0]
+    expect = (W * g["Ly"] - 2 * 0.5 * math.pi * Dc ** 2 / 4) * g["t_f_half"]
+    assert fin.Volume() == pytest.approx(expect, rel=1e-9)
+
+
+@needs_cad
+def test_cell_air_sits_above_fin():
+    from fthx import presets, cell
+    p = presets.cell()
+    g = cell.cell_geometry(p)
+    B = {c.name: c.obj for c in cell.build(p)[0].children}
+    for k in ("fluid_cell_up", "fluid_cell_core", "fluid_cell_down"):
+        bb = B[k].BoundingBox()
+        assert bb.zmin == pytest.approx(g["t_f_half"], abs=1e-6)
+        assert bb.zmax == pytest.approx(g["Lz"], abs=1e-6)
