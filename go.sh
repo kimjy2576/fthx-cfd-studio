@@ -4,7 +4,8 @@
 #   ./go.sh                 probe · 32 core
 #   ./go.sh tutorial 8      케이스 · 코어
 #   ./go.sh probe 32 --no-pull
-#   STAGE=setup ./go.sh probe 8      메시 후 해석 설정
+#   STAGE=setup ./go.sh probe 8              해석 설정만
+#   ITER=50 STAGE=solve ./go.sh probe 8      설정 + 반복 계산
 #
 # 완료를 기다렸다가 결과까지 찍으므로 bjobs 를 손으로 볼 필요가 없음.
 
@@ -32,8 +33,8 @@ fi
 
 # ── 2. 이전 결과 정리 ─────────────────────────────────────
 echo "[2/5] 이전 결과 정리"
-if [ "${STAGE:-mesh}" = "setup" ]; then
-  rm -f "$DIR"/*.trn "$DIR"/*.lsflog "$DIR"/*.cas.h5 "$DIR"/hosts.* 2>/dev/null
+if [ "${STAGE:-mesh}" = "setup" ] || [ "${STAGE:-mesh}" = "solve" ]; then
+  rm -f "$DIR"/*.trn "$DIR"/*.lsflog "$DIR"/*.cas.h5 "$DIR"/*.dat.h5 "$DIR"/hosts.* 2>/dev/null
 else
   rm -f "$DIR"/*.trn "$DIR"/*.lsflog "$DIR"/*.msh.h5 "$DIR"/*.cas.h5 "$DIR"/hosts.* 2>/dev/null
   rm -rf "$DIR"/*_workflow_files 2>/dev/null
@@ -42,9 +43,12 @@ rm -rf "$DIR"/*_workflow_files 2>/dev/null
 
 # ── 3. 제출 ───────────────────────────────────────────────
 cd "$DIR"
-echo "[3/5] 제출 — $CASE · ${CORES} core · ${STAGE:-mesh}"
+echo "[3/5] 제출 — $CASE · ${CORES} core · ${STAGE:-mesh}${FTHX_ITER:+ · ${FTHX_ITER}회}"
 JOURNAL=mesh.py; MODE="3d -meshing"
-if [ "${STAGE:-mesh}" = "setup" ]; then JOURNAL=setup.py; MODE="3ddp"; fi
+case "${STAGE:-mesh}" in
+  setup) JOURNAL=setup.py; MODE="3ddp";;
+  solve) JOURNAL=setup.py; MODE="3ddp"; export FTHX_ITER="${ITER:-200}";;
+esac
 OUT=$(fluent $MODE -g -t"$CORES" -i "$JOURNAL" 2>&1)
 echo "$OUT" | sed 's/^/      /'
 JOB=$(echo "$OUT" | grep -oE 'Job <[0-9]+>' | grep -oE '[0-9]+' | head -1)
@@ -78,6 +82,7 @@ while true; do
     echo; LAST=$ST
   else
     printf "."
+    [ $(( (SECONDS-T0) % 300 )) -lt 5 ] && printf " %dm" $(( (SECONDS-T0)/60 ))
   fi
   sleep 5
 done

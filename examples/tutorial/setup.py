@@ -22,7 +22,7 @@ except NameError:
 
 MESH_IN  = os.path.join(_HERE, r"mesh_labeled.msh.h5")
 CASE_OUT = os.path.join(_HERE, r"case.cas.h5")
-ITER     = 0
+ITER     = int(os.environ.get("FTHX_ITER", "0"))
 
 # ── 유도된 값 ──────────────────────────────────────────────
 POROSITY  = 0.930063
@@ -363,15 +363,100 @@ step("9. 초기화", _init)
 
 step("10. 케이스 저장", lambda: TUI().file.write_case(CASE_OUT))
 
+# ── 11. 리포트 정의 (수렴 판정용 물리량) ──────────────────
+# residual 만으로는 수렴을 판정할 수 없음. 물리량이 안정됐는지 봐야 함.
+def _reports():
+    S = SETTINGS()
+    rd = getattr(getattr(S, "solution", None), "report_definitions", None)
+    if rd is None:
+        print("    report_definitions 없음")
+        return
+    print("    하위: %s" % [x for x in dir(rd) if not x.startswith("_")][:16])
+    specs = [
+        ("dp_air", "surface_areaavg", {"field": "pressure",
+                                       "surface_names": ["air_inlet"]}),
+        ("t_air_out", "surface_massavg", {"field": "temperature",
+                                          "surface_names": ["air_outlet"]}),
+        ("m_air_in", "flux", {"zone_names": ["air_inlet"]}),
+    ]
+    for nm, kind, args in specs:
+        obj = getattr(rd, kind, None)
+        if obj is None:
+            print("    [--] %-16s (%s 없음)" % (nm, kind))
+            continue
+        got, _ = try_all("리포트 %s (%s)" % (nm, kind), [
+            ("create+set", lambda o=obj, n=nm, a=args: (
+                o.create(n), o[n].set_state(a))[1]),
+            ("create only", lambda o=obj, n=nm: o.create(n)),
+        ])
+        if got:
+            try:
+                print("      [스키마] %s" % str(obj[nm].get_state())[:200])
+            except Exception:
+                pass
+step("11. 리포트 정의", _reports)
+
+# ── 12. 반복 ───────────────────────────────────────────────
+def _iterate():
+    S = SETTINGS()
+    rc = getattr(getattr(S, "solution", None), "run_calculation", None)
+    if rc is not None:
+        print("    run_calculation 하위: %s"
+              % [x for x in dir(rc) if not x.startswith("_")][:18])
+    try_all("반복 %d 회" % ITER, [
+        ("settings run_calculation.iterate",
+         lambda: rc.iterate(iter_count=ITER)),
+        ("settings iterate(N)", lambda: rc.iterate(ITER)),
+        ("tui solve.iterate", lambda: TUI().solve.iterate(ITER)),
+    ])
+
 if ITER > 0:
-    step("11. 반복 %d회" % ITER, lambda: TUI().solve.iterate(ITER))
-    step("12. 데이터 저장",
+    step("12. 반복 %d회" % ITER, _iterate)
+
+    # ── 13. 수렴 판정 ──────────────────────────────────────
+    def _converged():
+        """물리량 추이로 판정. residual 은 참고용."""
+        S = SETTINGS()
+        try:
+            rp = S.solution.report_definitions
+            for n in ("dp_air", "t_air_out", "m_air_in"):
+                try:
+                    print("    %-12s %s" % (n, str(rp[n].get_state())[:120]))
+                except Exception:
+                    pass
+        except Exception as ex:
+            print("    리포트 조회 실패: %s" % ex)
+        # 면적분으로 직접 뽑기 — 리포트 정의가 실패해도 이건 됨
+        t = TUI()
+        for label, path, args in (
+                ("공기 입구 압력", "report.surface_integrals.area_weighted_avg",
+                 ("air_inlet", "()", "pressure", "no")),
+                ("공기 출구 압력", "report.surface_integrals.area_weighted_avg",
+                 ("air_outlet", "()", "pressure", "no")),
+                ("공기 출구 온도", "report.surface_integrals.mass_weighted_avg",
+                 ("air_outlet", "()", "temperature", "no")),
+        ):
+            o = t
+            for part in path.split("."):
+                o = getattr(o, part, None)
+                if o is None:
+                    break
+            if o is None:
+                print("    [--] %s (%s 없음)" % (label, path))
+                continue
+            try_all(label, [(path, lambda o=o, a=args: o(*a))])
+    step("13. 수렴 물리량", _converged)
+
+    step("14. 데이터 저장",
          lambda: TUI().file.write_data(CASE_OUT.replace(".cas", ".dat")))
 
 def _verify():
     import time
     print("    저널 폴더: " + _HERE)
-    for f in (MESH_IN, CASE_OUT):
+    files = [MESH_IN, CASE_OUT]
+    if ITER > 0:
+        files.append(CASE_OUT.replace(".cas", ".dat"))
+    for f in files:
         if os.path.exists(f):
             st = os.stat(f)
             print("    [OK] %-28s %8.1f MB  %s" % (
@@ -379,7 +464,7 @@ def _verify():
                 time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime))))
         else:
             print("    [!!] %-28s 없음" % os.path.basename(f))
-step("13. 파일 확인", _verify)
+step("15. 파일 확인", _verify)
 
 print("=" * 60)
 print("SETUP 완료. 포러스 존 설정은 위 5단계 출력값을 확인할 것")
