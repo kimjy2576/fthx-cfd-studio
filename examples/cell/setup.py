@@ -16,7 +16,7 @@ try:
 except NameError:
     _HERE = os.getcwd()
 
-MESH_IN  = os.path.join(_HERE, r"cell.msh.h5")
+MESH_IN  = os.path.join(_HERE, r"cell_labeled.msh.h5")
 CASE_OUT = os.path.join(_HERE, r"cell.cas.h5")
 ITER     = int(os.environ.get("FTHX_ITER", "0"))
 U_MAX    = 2.869315     # m/s, 최소유동면적 기준
@@ -87,15 +87,44 @@ def _models():
 step("3. 에너지 + 점성 모델", _models)
 
 def _zone_types():
+    """입출구만 이름으로 찾아 타입을 바꿈.
+
+    대칭면끼리 한 존으로 묶이는 것은 무방함 — 전부 같은 symmetry BC 이기 때문.
+    문제는 입출구가 대칭면과 섞이는 것뿐이고, 그건 면 단위 임포트로 해결함.
+    """
     t = TUI()
     for z, ty in (("cell_inlet", "velocity-inlet"),
-                  ("cell_outlet", "pressure-outlet"),
-                  ("sym_y0", "symmetry"), ("sym_y1", "symmetry"),
-                  ("sym_z1", "symmetry")):
+                  ("cell_outlet", "pressure-outlet")):
         try_all("%s -> %s" % (z, ty), [
             ("zone_type", lambda a=z, b=ty:
                 t.define.boundary_conditions.zone_type(a, b))])
-step("4. 존 타입 (대칭면 포함)", _zone_types)
+step("4. 입출구 타입", _zone_types)
+
+def _sym_walls():
+    """입출구가 아닌 자유면은 전부 대칭면임 — symmetry 로 바꿈.
+       (wall 로 두면 마찰·열손실이 생겨 f·j 가 왜곡됨)"""
+    S = SETTINGS()
+    bc = S.setup.boundary_conditions
+    t = TUI()
+    try:
+        walls = list(bc.wall)
+    except Exception as ex:
+        print("    wall 목록 실패: %s" % ex)
+        return
+    print("    wall 존 %d개" % len(walls))
+    for w in walls:
+        print("      %s" % w)
+    # 고체 내부 계면(-solid- 포함)은 conjugate 이므로 건드리지 않음.
+    # 바디의 바깥 자유면(':' 로 끝나는 것)만 symmetry 로.
+    for w in walls:
+        if "-solid-" in w:
+            continue
+        if "fluid_cell" not in w:
+            continue          # 고체 바깥면은 단열 wall 로 둬도 무방
+        try_all("%s -> symmetry" % w, [
+            ("zone_type", lambda ww=w:
+                t.define.boundary_conditions.zone_type(ww, "symmetry"))])
+step("5. 대칭면", _sym_walls)
 
 def _bc():
     S = SETTINGS()
@@ -103,7 +132,7 @@ def _bc():
     for t_ in ("velocity_inlet", "pressure_outlet", "symmetry", "wall"):
         c = getattr(bc, t_, None)
         try:
-            print("    %-18s %s" % (t_, str(list(c))[:110] if c else None))
+            print("    %-18s %s" % (t_, str(list(c))[:120] if c else None))
         except Exception as ex:
             print("    %-18s !! %s" % (t_, ex))
     if "cell_inlet" in list(bc.velocity_inlet):
@@ -121,26 +150,43 @@ def _bc():
             ("gauge_pressure", lambda: o.momentum.set_state(
                 {"gauge_pressure": {"option": "value", "value": 0.0}})),
         ])
-    # 핀·관 표면을 등온으로 — 냉매측을 풀지 않고 h 만 뽑기 위함
-    walls = [w for w in list(bc.wall)
-             if "fin" in w or "tube" in w]
-    print("    등온 벽: %s" % walls[:8])
-    for w in walls:
-        try_all("wall %s = %.1f K" % (w, T_WALL), [
-            ("thermal.temperature", lambda ww=w: bc.wall[ww].thermal.set_state(
-                {"thermal_condition": "Temperature",
-                  "temperature": {"option": "value", "value": T_WALL}})),
-            ("temperature 만", lambda ww=w: bc.wall[ww].thermal.set_state(
-                {"temperature": {"option": "value", "value": T_WALL}})),
-        ])
-step("5. 경계조건", _bc)
+step("6. 입출구 조건", _bc)
 
-step("6. 초기화", lambda: try_all("hybrid", [
+def _tube_isothermal():
+    """관을 등온 고체로 — 냉매측을 풀지 않고 공기측 h 만 뽑기 위함.
+       벽 BC 대신 셀 존 fixed_values 를 씀. 관 자유면이 대칭 절단면과
+       묶여 있어 벽 BC 로는 대칭면까지 등온이 되기 때문."""
+    S = SETTINGS()
+    fl = S.setup.cell_zone_conditions.solid
+    zones = [z for z in list(fl) if "tube" in z]
+    print("    관 존: %s" % zones)
+    for z in zones:
+        o = fl[z]
+        try:
+            print("    [스키마] %s" % str(o.get_state())[:220])
+        except Exception as ex:
+            print("    스키마 실패: %s" % ex)
+        try_all("%s 고정온도 %.2f K" % (z, T_WALL), [
+            ("fixed_values enable+t", lambda oo=o: oo.fixed_values.set_state(
+                {"enable": True,
+                 "t": {"option": "value", "value": T_WALL}})),
+            ("fixed_values temperature", lambda oo=o: oo.fixed_values.set_state(
+                {"enable": True,
+                 "temperature": {"option": "value", "value": T_WALL}})),
+            ("enable 만", lambda oo=o: oo.fixed_values.set_state({"enable": True})),
+        ])
+        try:
+            print("    [확인] %s" % str(o.fixed_values.get_state())[:220])
+        except Exception as ex:
+            print("    [확인] 실패: %s" % ex)
+step("7. 관 등온 (고정온도)", _tube_isothermal)
+
+step("8. 초기화", lambda: try_all("hybrid", [
     ("settings", lambda: SETTINGS().solution.initialization.hybrid_initialize())]))
-step("7. 케이스 저장", lambda: TUI().file.write_case(CASE_OUT))
+step("9. 케이스 저장", lambda: TUI().file.write_case(CASE_OUT))
 
 if ITER > 0:
-    step("8. 반복 %d회" % ITER, lambda: try_all("iterate", [
+    step("10. 반복 %d회" % ITER, lambda: try_all("iterate", [
         ("run_calculation",
          lambda: SETTINGS().solution.run_calculation.iterate(iter_count=ITER))]))
 
@@ -206,8 +252,8 @@ if ITER > 0:
                               + ["%.9g" % AREA, "%.6g" % U_MAX,
                                  "%.6g" % T_IN, "%.6g" % T_WALL]) + NL)
         print("    [OK] cell_results.csv")
-    step("9. 결과 추출", _results)
-    step("10. 데이터 저장",
+    step("11. 결과 추출", _results)
+    step("12. 데이터 저장",
          lambda: TUI().file.write_data(CASE_OUT.replace(".cas", ".dat")))
 
 def _verify():
@@ -221,7 +267,7 @@ def _verify():
                 time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime))))
         else:
             print("    [!!] %-24s 없음" % os.path.basename(f))
-step("11. 파일 확인", _verify)
+step("13. 파일 확인", _verify)
 
 print("=" * 60)
 print("CELL 완료")

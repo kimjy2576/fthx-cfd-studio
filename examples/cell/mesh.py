@@ -88,9 +88,32 @@ step("InitializeWorkflow",
      lambda: workflow.InitializeWorkflow(WorkflowType="Watertight Geometry"))
 
 def _import():
+    """면 단위 존 생성을 시도함.
+
+    Fluent 은 '인접 관계가 같은 면'을 한 존으로 묶으므로, 바디 단위로 두면
+    입구면이 대칭면·측벽과 한 덩어리가 되어 BC 를 걸 수 없음.
+    (실측: fluid_cell_up-solid:1 이 1203mm2 — 입구면만이면 10.8mm2)
+
+    대칭면끼리 묶이는 것은 무방함(전부 같은 symmetry BC). 입출구만 분리되면 됨.
+    """
     t = task("Import Geometry")
-    set_args(t, {"FileName": STEP, "LengthUnit": "mm", "AppendMesh": False})
-    t.Execute()
+    base = {"FileName": STEP, "LengthUnit": "mm", "AppendMesh": False}
+    got, _ = try_all("임포트 (면 단위 존)", [
+        ("CreateObjectPer=Face",
+         lambda: (set_args(t, dict(base, CreateObjectPer="Face")), t.Execute())[1]),
+        ("OneZonePer=Face",
+         lambda: (set_args(t, dict(base, OneZonePer="Face")), t.Execute())[1]),
+        ("run_menu cad-geometry per-face", lambda: globals()["run_menu"](
+            "/file/import/cad-geometry yes " + chr(34) + STEP + chr(34)
+            + " mm no no yes no")),
+        ("바디 단위 (기본)",
+         lambda: (set_args(t, base), t.Execute())[1]),
+    ])
+    print("    임포트 방식: %s" % got)
+    try:
+        print("    Arguments: %s" % t.Arguments.get_state())
+    except Exception as ex:
+        print("    Arguments 조회 실패: %s" % ex)
 step("1. Import Geometry", _import)
 
 step("2. Add Local Sizing (건너뜀)",
