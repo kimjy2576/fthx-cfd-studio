@@ -1188,3 +1188,17 @@ def test_cell_air_sits_above_fin():
         assert "DarcyForchheimer" in fv and "fluid_air_core_r01" in fv
         u = (c / "0/U").read_text("utf-8")
         assert f"({p.operating.air.V_face} 0 0)" in u
+
+
+def test_cell_mesh_journal_uses_seed_separation():
+    """각도 분리는 존 이름을 파괴하므로(probe 실측) seed 기반이어야 함"""
+    from fthx import presets, exporters, cell
+    p = presets.cell()
+    j = exporters.cell_mesh_journal(p, n_bodies=6,
+                                    face_seeds=cell.build(p)[1]["face_seeds"])
+    assert "execute_tui" in j                    # run_menu 는 없음(실측)
+    assert "separate_face_zones_by_seed" in j
+    assert "sep-face-zone-by-angle" not in j     # 이름 파괴 — 쓰지 않음
+    # 분리 → 매칭 → 개명 순서
+    assert j.index("12b. seed 기반 존 분리") < j.index("13. face_seeds 좌표 매칭")
+    assert j.index("13. face_seeds 좌표 매칭") < j.index("14. 존 이름 부여")

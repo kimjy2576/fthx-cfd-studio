@@ -362,50 +362,65 @@ def _dump_zones():
                ("%.1f" % r["area"]) if r["area"] else "?"))
 step("12. 면 존 표 (id/이름/좌표/면적)", _dump_zones)
 
-def _sep_api():
-    """좌표·법선으로 존을 쪼개는 경로 탐색.
+def TUI_EXEC(cmd):
+    """TUI 명령을 문자열로 실행.
+       실측: run_menu 는 없고 meshing.execute_tui 가 동작함."""
+    g = globals()
+    for nm in ("meshing", "session", "solver"):
+        o = g.get(nm)
+        fn = getattr(o, "execute_tui", None) if o is not None else None
+        if fn is not None:
+            return fn(cmd)
+    raise NameError("execute_tui 없음")
 
-    면 단위 임포트가 안 되면 메시 후에 쪼개면 됨. 각도 분리는 이름을 파괴하므로
-    (probe 실측) 좌표/법선 기반이 있는지 본다.
+def _sep_api():
+    """seed 좌표로 존을 쪼갬.
+
+    실측으로 확인된 것:
+      meshing.execute_tui(cmd)              TUI 문자열 실행 [OK]
+      mu.separate_face_zones_by_seed        좌표 기반 분리 존재
+      tui.boundary.separate.sep_face_zone_by_seed  도 있음
+    각도 분리는 이름을 파괴하므로(probe 실측) 쓰지 않음.
     """
-    mu = MU
-    if mu is None:
-        print("    meshing_utilities 없음")
-        return
-    hits = [x for x in dir(mu) if not x.startswith("_")
-            and any(k in x.lower() for k in
-                    ("separate", "split", "mark", "region", "normal",
-                     "angle", "seed", "island", "connected"))]
-    print("    분리/마킹 후보 (%d):" % len(hits))
-    for i in range(0, len(hits), 3):
-        print("      " + ", ".join(hits[i:i + 3]))
-    # 시그니처 확인
-    for nm in ("separate_face_zones_by_angle",
-               "separate_face_zones_by_seed",
-               "separate_face_zones_by_region",
-               "separate_face_zones_by_cell_neighbor",
-               "mark_faces_in_region"):
-        fn = getattr(mu, nm, None)
-        if fn is None:
-            print("      [--] %s 없음" % nm)
+    print("    seed %d개로 분리 시도" % len(FACE_SEEDS))
+    rows = globals().get("_ROWS") or []
+    # 입출구가 묶여 있는 존(공기 상류/하류)만 대상
+    targets = [r for r in rows if r["name"] and "fluid_cell" in str(r["name"])
+               and "-solid-" not in str(r["name"])]
+    print("    대상 존: %s" % [r["name"] for r in targets])
+
+    for key in ("cell_inlet", "cell_outlet"):
+        sd = FACE_SEEDS.get(key)
+        if not sd:
             continue
-        try:
-            print("      [??] %-38s doc: %s" % (nm, str(fn.__doc__)[:160]))
-        except Exception:
-            print("      [??] %s 있음" % nm)
-    # TUI 쪽 경로도
+        x, y, z = sd
+        for r in targets:
+            zn = r["name"]
+            got, _ = try_all("%s <- %s seed %s" % (key, zn,
+                                                   [round(v, 2) for v in sd]), [
+                ("mu.separate_face_zones_by_seed(name,x,y,z)",
+                 lambda zn=zn: MU.separate_face_zones_by_seed(
+                     face_zone_name_list=[zn], seed_point=[x, y, z])),
+                ("mu.separate_face_zones_by_seed(id)",
+                 lambda r=r: MU.separate_face_zones_by_seed(
+                     face_zone_id_list=[r["id"]], seed_point=[x, y, z])),
+                ("execute_tui sep-face-zone-by-seed",
+                 lambda zn=zn: TUI_EXEC(
+                     "/boundary/separate/sep-face-zone-by-seed %s %g %g %g 40 ()"
+                     % (zn, x, y, z))),
+                ("execute_tui sep-face-zone-by-region",
+                 lambda zn=zn: TUI_EXEC(
+                     "/boundary/separate/sep-face-zone-by-region %s ()" % zn)),
+            ])
+            if got:
+                break
+    # 분리 후 존 목록
     try:
-        b = TUI().boundary
-        ns = [x for x in dir(b) if not x.startswith("_")]
-        print("    tui.boundary 하위 (%d): %s" % (len(ns), ns[:24]))
-        for sub in ("manage", "separate", "modify"):
-            o = getattr(b, sub, None)
-            if o is not None:
-                print("      .%s: %s" % (sub, [x for x in dir(o)
-                                               if not x.startswith("_")][:20]))
+        ids = MU.get_face_zones(filter="*")
+        print("    분리 후 면 존 %d개" % len(ids))
     except Exception as ex:
-        print("    tui.boundary 실패: %s" % ex)
-step("12b. 존 분리 API 탐색", _sep_api)
+        print("    존 재조회 실패: %s" % ex)
+step("12b. seed 기반 존 분리", _sep_api)
 
 # 각도 분리 단계는 제거함.
 # 케이싱 솔리드가 있으면 상·하류 박스의 자유면이 입구/출구만 남아
