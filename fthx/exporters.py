@@ -1603,8 +1603,11 @@ def _zone_types():
 step("4. 입출구 타입", _zone_types)
 
 def _sym_walls():
-    """입출구가 아닌 자유면은 전부 대칭면임 — symmetry 로 바꿈.
-       (wall 로 두면 마찰·열손실이 생겨 f·j 가 왜곡됨)"""
+    """입출구가 아닌 fluid 자유면을 periodic 으로.
+
+    전체 피치 도메인이므로 y=0↔y=Pt, z=0↔z=Fp 가 translational periodic 임.
+    (대칭 1/4 로는 Fluent 이 입구면을 분리해주지 않았고, meshing_utilities 에
+     좌표 기반 면존 분리 함수가 없음을 실측 확인 — 그래서 전체 피치로 전환)"""
     S = SETTINGS()
     bc = S.setup.boundary_conditions
     t = TUI()
@@ -1623,8 +1626,10 @@ def _sym_walls():
             continue
         if "fluid_cell" not in w:
             continue          # 고체 바깥면은 단열 wall 로 둬도 무방
-        try_all("%s -> symmetry" % w, [
-            ("zone_type", lambda ww=w:
+        try_all("%s -> periodic" % w, [
+            ("zone_type periodic", lambda ww=w:
+                t.define.boundary_conditions.zone_type(ww, "periodic")),
+            ("zone_type symmetry", lambda ww=w:
                 t.define.boundary_conditions.zone_type(ww, "symmetry"))])
 step("5. 대칭면", _sym_walls)
 

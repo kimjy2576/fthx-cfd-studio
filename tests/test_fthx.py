@@ -1038,17 +1038,21 @@ def test_journal_writes_results_csv():
 
 
 # ─────────────────── 주기 단위셀 (핀 실형상) ───────────────────
-def test_cell_geometry_symmetry_planes(p):
-    """staggered 는 인접 열이 Pt/2 엇갈리므로 y=0 과 y=Pt/2 가 모두 관 중심"""
+def test_cell_geometry_periodic_full_pitch(p):
+    """기본은 전체 피치 + periodic. 대칭 1/4 은 입출구가 분리되지 않아 폐기."""
     from fthx import cell
     g = cell.cell_geometry(p)
-    assert g["Ly"] == pytest.approx(p.tube.Pt / 2)
-    assert g["Lz"] == pytest.approx(p.fin.Fp / 2)
+    assert g["periodic"] is True
+    assert g["Ly"] == pytest.approx(p.tube.Pt)
+    assert g["Lz"] == pytest.approx(p.fin.Fp)
+    # 핀은 z 중앙
+    fz0, fz1 = g["fin_z"]
+    assert fz1 - fz0 == pytest.approx(p.fin.t_f)
+    assert (fz0 + fz1) / 2 == pytest.approx(g["Lz"] / 2)
+    half = cell.cell_geometry(p, periodic=False)
+    assert half["Ly"] == pytest.approx(p.tube.Pt / 2)
     cs = cell.tube_centers(p, g)
     assert len(cs) == p.tube.Nr
-    ys = [y for _r, _x, y in cs]
-    if p.tube.layout == "staggered":
-        assert set(round(y, 6) for y in ys) == {0.0, round(p.tube.Pt / 2, 6)}
 
 
 @needs_cad
@@ -1057,13 +1061,17 @@ def test_cell_bodies_and_no_overlap(p):
     assy, m = cell.build(p, include_ref=True)
     B = {c.name: c.obj for c in assy.children}
     assert "solid_fin" in B
-    assert sum(1 for k in B if k.startswith("solid_tube_")) == p.tube.Nr
     assert sum(1 for k in B if k.startswith("fluid_cell_")) == 3
     assert CAD.check_overlap(assy) == []
-    # 핀은 두께 반쪽만 (z = 0 ~ t_f/2)
+    g = cell.cell_geometry(p)
+    fz0, fz1 = g["fin_z"]
     bb = B["solid_fin"].BoundingBox()
-    assert bb.zmin == pytest.approx(0.0, abs=1e-9)
-    assert bb.zmax == pytest.approx(p.fin.t_f / 2, abs=1e-9)
+    assert bb.zmin == pytest.approx(fz0, abs=1e-9)
+    assert bb.zmax == pytest.approx(fz1, abs=1e-9)
+    # periodic 경계에 걸친 관은 a/b 두 조각으로 나뉨
+    tubes = [k for k in B if k.startswith("solid_tube_")]
+    assert any(k.endswith("a") for k in tubes)
+    assert any(k.endswith("b") for k in tubes)
 
 
 @needs_cad
@@ -1075,11 +1083,11 @@ def test_cell_fin_area_matches_analytic(p):
     fin = {c.name: c.obj for c in assy.children}["solid_fin"]
     Dc = p.tube.Do + 2 * p.fin.t_f
     top = sum(f.Area() for f in fin.Faces()
-              if abs(f.normalAt(f.Center()).z) > 0.99
-              and abs(f.Center().z - g["t_f_half"]) < 1e-9)
+              if f.geomType() == "PLANE"
+              and abs(f.Center().z - g["fin_z"][1]) < 1e-9)
     W = g["x_core"][1] - g["x_core"][0]
-    expect = W * g["Ly"] - p.tube.Nr * 0.5 * math.pi * Dc ** 2 / 4
-    assert top == pytest.approx(expect, rel=1e-9)
+    expect = W * g["Ly"] - p.tube.Nr * math.pi * Dc ** 2 / 4
+    assert top == pytest.approx(expect, rel=1e-6)
 
 
 @needs_cad
@@ -1087,8 +1095,8 @@ def test_cell_export(p, tmp_path):
     from fthx import cell
     m = cell.export(p, outdir=str(tmp_path))
     assert m["mode"] == "periodic_cell"
-    assert set(m["face_seeds"]) == {"cell_inlet", "cell_outlet",
-                                    "sym_y0", "sym_y1", "sym_z1"}
+    # periodic 은 입출구가 유일한 자유면 — 이것이 전환의 목적임
+    assert set(m["face_seeds"]) == {"cell_inlet", "cell_outlet"}
 
 
 def test_cell_sizing_is_anisotropic(p):
@@ -1125,24 +1133,15 @@ def test_cell_journals_valid():
 
 
 @needs_cad
-def test_cell_tubes_sit_on_symmetry_planes():
-    """staggered 단일셀: 관은 y=0 과 y=Pt/2 대칭면 위에 반쪽으로 놓여야 함.
-       반쪽 폭은 관 외경이 아니라 **칼라 외경** D_c/2 임 (칼라가 더 큼)."""
+def test_cell_tubes_split_at_periodic_boundary():
+    """y=0 에 놓인 관은 periodic 경계에 걸치므로 a/b 두 조각.
+       둘을 합하면 온전한 관 하나(= 엇갈린 열의 관)와 체적이 같아야 함."""
     from fthx import presets, cell
     p = presets.cell()
-    g = cell.cell_geometry(p)
     B = {c.name: c.obj for c in cell.build(p)[0].children}
-    Dc = p.tube.Do + 2 * p.fin.t_f
-    Ly = g["Ly"]
-    for k in ("solid_tube_r01", "solid_tube_r02"):
-        bb = B[k].BoundingBox()
-        assert bb.ylen == pytest.approx(Dc / 2, abs=1e-3)
-        on0 = abs(bb.ymin) < 1e-6
-        on1 = abs(bb.ymax - Ly) < 1e-6
-        assert on0 or on1, f"{k} 가 대칭면 위에 없음"
-    # 두 관은 서로 반대 대칭면에 있어야 staggered 가 재현됨
-    b1, b2 = B["solid_tube_r01"].BoundingBox(), B["solid_tube_r02"].BoundingBox()
-    assert abs(b1.ymin) < 1e-6 and abs(b2.ymax - Ly) < 1e-6
+    va = B["solid_tube_r01a"].Volume() + B["solid_tube_r01b"].Volume()
+    vb = B["solid_tube_r02"].Volume()
+    assert va == pytest.approx(vb, rel=1e-6)
 
 
 @needs_cad
@@ -1153,19 +1152,21 @@ def test_cell_fin_volume_analytic():
     fin = {c.name: c.obj for c in cell.build(p)[0].children}["solid_fin"]
     Dc = p.tube.Do + 2 * p.fin.t_f
     W = g["x_core"][1] - g["x_core"][0]
-    expect = (W * g["Ly"] - 2 * 0.5 * math.pi * Dc ** 2 / 4) * g["t_f_half"]
-    assert fin.Volume() == pytest.approx(expect, rel=1e-9)
+    holes = p.tube.Nr * math.pi * Dc ** 2 / 4       # 걸친 관도 합치면 1개분
+    expect = (W * g["Ly"] - holes) * p.fin.t_f
+    assert fin.Volume() == pytest.approx(expect, rel=1e-6)
 
 
 @needs_cad
-def test_cell_air_sits_above_fin():
+def test_cell_air_spans_full_pitch():
+    """periodic 은 핀 위·아래 모두 공기 — z 전체를 채움"""
     from fthx import presets, cell
     p = presets.cell()
     g = cell.cell_geometry(p)
     B = {c.name: c.obj for c in cell.build(p)[0].children}
     for k in ("fluid_cell_up", "fluid_cell_core", "fluid_cell_down"):
         bb = B[k].BoundingBox()
-        assert bb.zmin == pytest.approx(g["t_f_half"], abs=1e-6)
+        assert bb.zmin == pytest.approx(0.0, abs=1e-6)
         assert bb.zmax == pytest.approx(g["Lz"], abs=1e-6)
     def test_air_mode_physics(self, tmp_path):
         """F3: air 모드 — ref 제외·관=wall patch·물리 파일·포러스 계수 매핑"""

@@ -3,10 +3,10 @@
 #
 #   fluent 3ddp -g -t8 -i cell_setup.py
 #
-# 도메인 x 176.0 · y 12.70 (Pt/2) · z 0.907 (Fp/2) mm
+# 도메인 x 176.0 · y 25.40 (Pt/2) · z 1.814 (Fp/2) mm
 # 네 측면 모두 대칭면 — 주기 경계 불필요
 # Re_Dh 489 (laminar) → 난류 모델 끔
-# 셀 추정 376k · h_xy 0.25 · z 10+2층
+# 셀 추정 1502k · h_xy 0.25 · z 10+2층
 
 import os
 import traceback
@@ -23,7 +23,7 @@ U_MAX    = 2.869315     # m/s, 최소유동면적 기준
 V_FACE   = 2.000000    # m/s, 전면속도 (입구 BC)
 T_IN     = 300.15       # K
 T_WALL   = 280.15     # K, 관벽·핀뿌리 등온
-AREA     = 0.000509549            # m2, 공기측 전열면적
+AREA     = 0.001936552            # m2, 공기측 전열면적
 LAMINAR  = True
 CASE     = "cell_plain_cell"
 
@@ -101,8 +101,11 @@ def _zone_types():
 step("4. 입출구 타입", _zone_types)
 
 def _sym_walls():
-    """입출구가 아닌 자유면은 전부 대칭면임 — symmetry 로 바꿈.
-       (wall 로 두면 마찰·열손실이 생겨 f·j 가 왜곡됨)"""
+    """입출구가 아닌 fluid 자유면을 periodic 으로.
+
+    전체 피치 도메인이므로 y=0↔y=Pt, z=0↔z=Fp 가 translational periodic 임.
+    (대칭 1/4 로는 Fluent 이 입구면을 분리해주지 않았고, meshing_utilities 에
+     좌표 기반 면존 분리 함수가 없음을 실측 확인 — 그래서 전체 피치로 전환)"""
     S = SETTINGS()
     bc = S.setup.boundary_conditions
     t = TUI()
@@ -121,8 +124,10 @@ def _sym_walls():
             continue
         if "fluid_cell" not in w:
             continue          # 고체 바깥면은 단열 wall 로 둬도 무방
-        try_all("%s -> symmetry" % w, [
-            ("zone_type", lambda ww=w:
+        try_all("%s -> periodic" % w, [
+            ("zone_type periodic", lambda ww=w:
+                t.define.boundary_conditions.zone_type(ww, "periodic")),
+            ("zone_type symmetry", lambda ww=w:
                 t.define.boundary_conditions.zone_type(ww, "symmetry"))])
 step("5. 대칭면", _sym_walls)
 

@@ -33,22 +33,41 @@ from typing import Optional
 from .params import FTHXParams
 
 
-def cell_geometry(p: FTHXParams, n_up: float = 2.0, n_down: float = 4.0) -> dict:
-    """단일셀 도메인 치수. n_up/n_down 은 Pl 배수."""
+def cell_geometry(p: FTHXParams, n_up: float = 2.0, n_down: float = 4.0,
+                  periodic: bool = True) -> dict:
+    """단일셀 도메인 치수. n_up/n_down 은 Pl 배수.
+
+    periodic=True (기본)
+        y 0~Pt, z 0~Fp 전체 피치. 측면은 translational periodic.
+        **대칭면을 쓰지 않으므로 입출구가 다른 면과 한 존으로 묶이지 않음.**
+        (대칭 1/4 로는 Fluent 이 입구면을 분리해주지 않았고,
+         meshing_utilities 에 좌표 기반 면존 분리 함수가 없음을 실측 확인)
+    periodic=False
+        y 0~Pt/2, z 0~Fp/2 대칭 1/4. 셀은 1/4 이지만 입출구 분리 불가.
+    """
     t, f = p.tube, p.fin
     Fp = f.Fp
     L_up = n_up * t.Pl
     L_dn = n_down * t.Pl
     x_core0 = L_up
     x_core1 = L_up + t.Nr * t.Pl
+    if periodic:
+        Ly, Lz = t.Pt, Fp
+        fin_z = ((Fp - f.t_f) / 2.0, (Fp + f.t_f) / 2.0)   # 핀이 z 중앙
+        gap = (Fp - f.t_f) / 2.0                            # 핀 한쪽 간극
+    else:
+        Ly, Lz = t.Pt / 2.0, Fp / 2.0
+        fin_z = (0.0, f.t_f / 2.0)
+        gap = (Fp - f.t_f) / 2.0
     return {
         "Lx": L_up + t.Nr * t.Pl + L_dn,
-        "Ly": t.Pt / 2.0,
-        "Lz": Fp / 2.0,
+        "Ly": Ly, "Lz": Lz,
+        "periodic": periodic,
         "L_up": L_up, "L_down": L_dn,
         "x_core": (x_core0, x_core1),
         "Fp": Fp, "t_f_half": f.t_f / 2.0,
-        "gap_half": (Fp - f.t_f) / 2.0,
+        "fin_z": fin_z,
+        "gap_half": gap,
         "layout": t.layout,
     }
 
@@ -57,27 +76,47 @@ def tube_centers(p: FTHXParams, g: dict) -> list:
     """단일셀 안의 관 중심. staggered 는 열마다 y 가 0 / Pt/2 로 교대."""
     t = p.tube
     x0 = g["x_core"][0]
+    per = g.get("periodic", False)
     out = []
     for r in range(t.Nr):
         x = x0 + (r + 0.5) * t.Pl
-        if t.layout == "staggered" and r % 2 == 1:
-            y = t.Pt / 2.0          # 대칭면 위 — 반쪽 관이 됨
+        if per:
+            # 전체 피치: 관이 온전한 원통. staggered 는 열마다 Pt/2 엇갈림
+            y = t.Pt / 2.0 if (t.layout == "staggered" and r % 2 == 1) else 0.0
+            # y=0 인 관은 periodic 경계에 걸치므로 Pt 만큼 이동한 짝도 필요
         else:
-            y = 0.0                 # 대칭면 위 — 반쪽 관이 됨
+            y = t.Pt / 2.0 if (t.layout == "staggered" and r % 2 == 1) else 0.0
         out.append((r, x, y))
     return out
 
 
+def tube_instances(p: FTHXParams, g: dict) -> list:
+    """(r, x, y, tag) — tag 는 바디 이름 접미사."""
+    """도메인 안에 실제로 그려야 할 관 인스턴스.
+
+    periodic 도메인에서 y=0 에 놓인 관은 경계에 걸치므로 y=Pt 쪽에도
+    나머지 반쪽이 있어야 형상이 닫힘.
+    """
+    t = p.tube
+    out = []
+    for r, x, y in tube_centers(p, g):
+        split = g.get("periodic") and abs(y) < 1e-9
+        out.append((r, x, y, "a" if split else ""))
+        if split:
+            out.append((r, x, g["Ly"], "b"))   # 반대편 반쪽
+    return out
+
+
 def build(p: FTHXParams, n_up: float = 2.0, n_down: float = 4.0,
-          include_ref: bool = False):
+          include_ref: bool = False, periodic: bool = True):
     """CadQuery 어셈블리. 바디 이름은 풀사이즈와 같은 규약을 따름."""
     import cadquery as cq
 
-    g = cell_geometry(p, n_up, n_down)
+    g = cell_geometry(p, n_up, n_down, periodic)
     t, f = p.tube, p.fin
     Lx, Ly, Lz = g["Lx"], g["Ly"], g["Lz"]
     xc0, xc1 = g["x_core"]
-    tf2 = g["t_f_half"]
+    fz0, fz1 = g["fin_z"]
     Dc = t.Do + 2.0 * f.t_f          # 핀 칼라 외경
 
     def box(x0, x1, y0, y1, z0, z1):
@@ -89,69 +128,76 @@ def build(p: FTHXParams, n_up: float = 2.0, n_down: float = 4.0,
                                      cq.Vector(0, 0, 1))
 
     assy = cq.Assembly()
-    centers = tube_centers(p, g)
+    centers = tube_instances(p, g)
 
     # 관·칼라를 한 번에 빼내기 위한 컴파운드
     def cut_tubes(body, radius, z0, z1):
-        for _r, x, y in centers:
+        for _r, x, y, _tg in centers:
             body = body.cut(cyl(radius, x, y, z0, z1))
         return body
 
     # ---- 공기 (핀 사이 간극: z = tf2 ~ Lz) ----
     for tag, a, b in (("up", 0.0, xc0), ("core", xc0, xc1),
                       ("down", xc1, Lx)):
-        air = box(a, b, 0.0, Ly, tf2, Lz)
+        # 핀 위/아래 공기를 한 바디로 (핀이 중간에 있으면 자동으로 두 덩이)
+        air = box(a, b, 0.0, Ly, 0.0, Lz)
         if tag == "core":
-            air = cut_tubes(air, Dc / 2.0, tf2 - 1.0, Lz + 1.0)
+            air = air.cut(box(a, b, 0.0, Ly, fz0, fz1))     # 핀 두께 제거
+            air = cut_tubes(air, Dc / 2.0, -1.0, Lz + 1.0)
         else:
-            air = cut_tubes(air, t.Do / 2.0, tf2 - 1.0, Lz + 1.0)
+            air = cut_tubes(air, t.Do / 2.0, -1.0, Lz + 1.0)
         if air.Solids():
             assy.add(air, name=f"fluid_cell_{tag}",
                      color=cq.Color(0.55, 0.75, 0.95))
 
     # ---- 핀 (z = 0 ~ tf2, 두께 대칭 반쪽) ----
-    fin = box(xc0, xc1, 0.0, Ly, 0.0, tf2)
-    fin = cut_tubes(fin, Dc / 2.0, -1.0, tf2 + 1.0)
+    fin = box(xc0, xc1, 0.0, Ly, fz0, fz1)
+    fin = cut_tubes(fin, Dc / 2.0, -1.0, Lz + 1.0)
     if fin.Solids():
         assy.add(fin, name="solid_fin", color=cq.Color(0.85, 0.85, 0.88))
 
     # ---- 관벽 + 칼라 ----
-    for r, x, y in centers:
+    for r, x, y, tg in centers:
         wall = cyl(t.Do / 2.0, x, y, 0.0, Lz).cut(cyl(t.Di / 2.0, x, y, -1.0, Lz + 1.0))
-        collar = cyl(Dc / 2.0, x, y, 0.0, tf2).cut(
-            cyl(t.Do / 2.0, x, y, -1.0, tf2 + 1.0))
+        collar = cyl(Dc / 2.0, x, y, fz0, fz1).cut(
+            cyl(t.Do / 2.0, x, y, fz0 - 1.0, fz1 + 1.0))
         body = wall.fuse(collar).clean()
         body = body.intersect(box(0.0, Lx, 0.0, Ly, 0.0, Lz))
         if body.Solids():
-            assy.add(body, name=f"solid_tube_r{r+1:02d}",
+            assy.add(body, name=f"solid_tube_r{r+1:02d}{tg}",
                      color=cq.Color(0.8, 0.5, 0.2))
         if include_ref:
             ref = cyl(t.Di / 2.0, x, y, 0.0, Lz).intersect(
                 box(0.0, Lx, 0.0, Ly, 0.0, Lz))
             if ref.Solids():
-                assy.add(ref, name=f"fluid_ref_r{r+1:02d}",
+                assy.add(ref, name=f"fluid_ref_r{r+1:02d}{tg}",
                          color=cq.Color(0.2, 0.4, 0.9))
 
     # ---- face_seeds ----
-    ym, zm = Ly / 2.0, (tf2 + Lz) / 2.0
-    seeds = {
-        "cell_inlet":  [0.0, ym, zm],
-        "cell_outlet": [Lx, ym, zm],
-        "sym_y0":      [(xc0 + xc1) / 2.0, 0.0, zm],
-        "sym_y1":      [(xc0 + xc1) / 2.0, Ly, zm],
-        "sym_z1":      [(xc0 + xc1) / 2.0, ym, Lz],
-    }
+    ym, zm = Ly / 2.0, (fz1 + Lz) / 2.0
+    seeds = {"cell_inlet": [0.0, ym, zm], "cell_outlet": [Lx, ym, zm]}
+    if not g.get("periodic"):
+        seeds.update({
+            "sym_y0": [(xc0 + xc1) / 2.0, 0.0, zm],
+            "sym_y1": [(xc0 + xc1) / 2.0, Ly, zm],
+            "sym_z1": [(xc0 + xc1) / 2.0, ym, Lz]})
     meta = {
         "schema_version": p.schema_version,
         "name": f"{p.name}_cell",
         "units": "mm",
-        "mode": "periodic_cell",
+        "mode": "periodic_cell" if g.get("periodic") else "symmetric_cell",
         "geometry": g,
-        "tube_centers": [{"r": r, "x": x, "y": y} for r, x, y in centers],
+        "tube_centers": [{"r": r, "x": x, "y": y, "tag": tg}
+                         for r, x, y, tg in centers],
+        "periodic_pairs": ([{"a": "y0", "b": "y1", "dy": Ly},
+                            {"a": "z0", "b": "z1", "dz": Lz}]
+                           if g.get("periodic") else []),
         "face_seeds": seeds,
         "operating": p.operating.model_dump(),
         "operating_derived": p.operating_derived(),
-        "note": "핀 실형상 · 포러스 없음. 네 측면이 모두 대칭면.",
+        "note": ("핀 실형상 · 포러스 없음. "
+                 + ("전체 피치 + translational periodic — 입출구가 유일한 자유면."
+                    if g.get("periodic") else "네 측면이 모두 대칭면.")),
     }
     return assy, meta
 
@@ -188,17 +234,21 @@ def export(p: FTHXParams, outdir: str = "out", **kw) -> dict:
 #  메시 사이징 · 운전 조건
 # ══════════════════════════════════════════════════════════════════
 def cell_sizing(p: FTHXParams, h_xy: float = 0.25,
-                nz_gap: int = 10, nz_fin: int = 2) -> dict:
+                nz_gap: int = 10, nz_fin: int = 2,
+                periodic: bool = True) -> dict:
     """단일셀 메시. z 가 0.9mm 로 얇아 이방성이 필요함.
 
     y+ 는 1 근처이고 Re_Dh ~ 500 (층류) 이므로 벽함수를 쓰지 않음.
     """
-    g = cell_geometry(p)
+    g = cell_geometry(p, periodic=periodic)
+    layers_gap = nz_gap * (2 if periodic else 1)   # periodic 은 핀 위·아래 둘 다
+    layers_fin = nz_fin * (2 if periodic else 1)
     hz_gap = g["gap_half"] / nz_gap
-    hz_fin = g["t_f_half"] / nz_fin
-    n_air = (g["Lx"] / h_xy) * (g["Ly"] / h_xy) * nz_gap
-    n_fin = ((g["x_core"][1] - g["x_core"][0]) / h_xy) * (g["Ly"] / h_xy) * nz_fin
+    hz_fin = (p.fin.t_f / layers_fin) if periodic else (g["t_f_half"] / nz_fin)
+    n_air = (g["Lx"] / h_xy) * (g["Ly"] / h_xy) * layers_gap
+    n_fin = ((g["x_core"][1] - g["x_core"][0]) / h_xy) * (g["Ly"] / h_xy) * layers_fin
     return {
+        "periodic": periodic,
         "h_xy_mm": h_xy, "nz_gap": nz_gap, "nz_fin": nz_fin,
         "hz_gap_mm": hz_gap, "hz_fin_mm": hz_fin,
         "aspect_ratio": h_xy / hz_gap,
@@ -263,26 +313,25 @@ def extract_jf(p: FTHXParams, dp_Pa: float, q_W: float,
             "note": "이 j·f 를 closure 에 주입하면 상관식 대신 실측값이 됨"}
 
 
-def heat_area_m2(p: FTHXParams) -> float:
-    """셀의 공기측 전열면적 [m2] — 핀 노출면(위) + 관 외벽 노출면."""
-    import cadquery as cq  # noqa: F401
-    g = cell_geometry(p)
-    assy, _ = build(p)
+def heat_area_m2(p: FTHXParams, periodic: bool = True) -> float:
+    """셀의 공기측 전열면적 [m2] — 핀 노출면 + 관 외벽 노출면.
+
+    핀·관 고체가 공기와 맞닿는 면 전체를 셈. periodic 은 핀 양면이 모두
+    노출되므로 대칭 1/4 의 2배가 됨.
+    """
+    g = cell_geometry(p, periodic=periodic)
+    assy, _ = build(p, periodic=periodic)
     B = {c.name: c.obj for c in assy.children}
-    tf2 = g["t_f_half"]
+    air = [v for k, v in B.items() if k.startswith("fluid_cell")]
     A = 0.0
-    fin = B.get("solid_fin")
-    if fin is not None:
-        A += sum(f.Area() for f in fin.Faces()
-                 if abs(f.normalAt(f.Center()).z) > 0.99
-                 and abs(f.Center().z - tf2) < 1e-9)
     for k, v in B.items():
-        if not k.startswith("solid_tube"):
+        if not (k.startswith("solid_fin") or k.startswith("solid_tube")):
             continue
         for f in v.Faces():
-            if f.geomType() != "CYLINDER" or f.Center().z <= tf2 + 1e-9:
-                continue
-            bb = f.BoundingBox()
-            if abs(max(bb.xlen, bb.ylen) / 2 - p.tube.Do / 2) < 1e-3:
-                A += f.Area()
+            c = f.Center()
+            for a in air:
+                if any(abs(f.Area() - h.Area()) < 1e-6
+                       and (c - h.Center()).Length < 1e-6 for h in a.Faces()):
+                    A += f.Area()
+                    break
     return A / 1e6
