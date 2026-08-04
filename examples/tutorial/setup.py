@@ -379,10 +379,18 @@ def _thermal():
         # 실측 스키마: sources = {'energy': {'nsource': 0}}
         # 리스트가 아니라 nsource 로 슬롯 수를 먼저 정하는 구조.
         # 포러스가 porous=True 로 켠 뒤 저항 키가 드러난 것과 같은 패턴.
-        try_all("소스 슬롯 확보 %s" % n, [
-            ("energy.nsource = 1",
-             lambda o=obj: o.sources.set_state({"energy": {"nsource": 1}})),
-        ])
+        # 이미 슬롯이 있으면 set_state 가 False 를 반환함 (실측: child_names ['1'])
+        try:
+            have = list(obj.sources.energy.child_names)
+        except Exception:
+            have = []
+        if have:
+            print("    슬롯 이미 있음: %s" % have)
+        else:
+            try_all("소스 슬롯 확보 %s" % n, [
+                ("energy.nsource = 1",
+                 lambda o=obj: o.sources.set_state({"energy": {"nsource": 1}})),
+            ])
         # 진단은 예외를 삼키지 않음 — 실패 사실 자체가 정보임
         # (실측: try/except pass 로 감싸 [스키마2] 가 통째로 사라졌음)
         def _dump_energy(o=obj, zone=n):
@@ -401,6 +409,13 @@ def _thermal():
                     ("sources.energy[0]", lambda: o.sources.energy[0]),
                     ("sources.energy[1]", lambda: o.sources.energy[1]),
                     ("sources.energy['1']", lambda: o.sources.energy["1"]),
+                    ("energy['1'].get_state()",
+                     lambda: o.sources.energy["1"].get_state()),
+                    ("energy['1'].child_names",
+                     lambda: list(o.sources.energy["1"].child_names)),
+                    ("dir(energy['1'])",
+                     lambda: [x for x in dir(o.sources.energy["1"])
+                              if not x.startswith("_")]),
             ):
                 try:
                     print("      %-30s %s" % (label, str(fn())[:260]))
@@ -409,27 +424,34 @@ def _thermal():
                           % (label, type(ex).__name__, str(ex)[:90]))
         step("7b. sources 구조 (%s)" % n, _dump_energy)
 
+        # 실측: energy.child_names = ['1'], energy['1'] 접근 가능,
+        #       energy[1] 은 KeyError(정수 아님), set_state 는 KeyError:'option'
         EXPR = "hx_source"
-        try_all("에너지 소스 값 %s" % n, [
-            # 위 7b 덤프에서 실제 키가 나오면 그것으로 고정할 것
-            ("energy.1.set_state(expression)",
-             lambda o=obj: o.sources.energy["1"].set_state(
-                 {"option": "expression", "expression": EXPR})),
-            ("energy[1].set_state(expression)",
-             lambda o=obj: o.sources.energy[1].set_state(
-                 {"option": "expression", "expression": EXPR})),
-            ("energy.1 = expr 문자열",
-             lambda o=obj: o.sources.energy["1"].set_state(EXPR)),
-            ("sources.set_state(energy.1)",
-             lambda o=obj: o.sources.set_state({"energy": {
-                 "nsource": 1,
-                 "1": {"option": "expression", "expression": EXPR}}})),
-            ("sources.set_state(energy.source)",
-             lambda o=obj: o.sources.set_state({"energy": {
-                 "nsource": 1,
-                 "source": [{"option": "expression",
-                             "expression": EXPR}]}})),
-        ])
+        # 상수 폴백 [W/m3]. 표현식이 안 될 때만 씀 — 온도 의존성이 없어
+        # 입구 조건 기준 최대 냉각이 되므로 과대평가됨. 진단용으로만 볼 것.
+        VAL = HV * (T_REF - T_AIR_IN)
+        slot = None
+        try:
+            slot = obj.sources.energy["1"]
+        except Exception as ex:
+            print("    슬롯 접근 실패: %s" % ex)
+        if slot is not None:
+            try_all("에너지 소스 값 %s" % n, [
+                # 표현식이 우선 — 상수는 과대평가되므로 마지막 수단
+                ("slot = 표현식 문자열", lambda sl=slot: sl.set_state(EXPR)),
+                ("slot.option/value",
+                 lambda sl=slot: sl.set_state({"option": "value",
+                                               "value": VAL})),
+                ("slot = 숫자", lambda sl=slot: sl.set_state(VAL)),
+                ("slot.value", lambda sl=slot: sl.set_state({"value": VAL})),
+                ("slot.expression",
+                 lambda sl=slot: sl.set_state({"expression": EXPR})),
+            ])
+            try:
+                print("    [확인] energy['1'] = %s"
+                      % str(obj.sources.energy["1"].get_state())[:200])
+            except Exception as ex:
+                print("    [확인] 실패: %s" % ex)
         # TUI 폴백 — 설정 객체가 계속 안 맞으면 이쪽
         try_all("TUI 소스항 %s" % n, [
             ("define.boundary_conditions.fluid",
