@@ -35,7 +35,7 @@ MIN_SIZE    = 0.0850
 MAX_SIZE    = 0.2500
 GROWTH      = 1.2
 CELLS_PER_GAP = 1
-EXPECT_ZONES  = 7
+EXPECT_ZONES  = 11
 
 def step(label, fn):
     """각 단계를 감싸 로그에 남김. 실패해도 다음으로 진행해 진단을 모음."""

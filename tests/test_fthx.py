@@ -1061,7 +1061,9 @@ def test_cell_bodies_and_no_overlap(p):
     assy, m = cell.build(p, include_ref=True)
     B = {c.name: c.obj for c in assy.children}
     assert "solid_fin" in B
-    assert sum(1 for k in B if k.startswith("fluid_cell_")) == 3
+    # C안: up/core/down + 끝단 슬래브 2개
+    assert sum(1 for k in B if k.startswith("fluid_cell_")) == 5
+    assert "solid_cap_in" in B and "solid_cap_out" in B
     assert CAD.check_overlap(assy) == []
     g = cell.cell_geometry(p)
     fz0, fz1 = g["fin_z"]
@@ -1133,6 +1135,37 @@ def test_cell_journals_valid():
 
 
 @needs_cad
+def test_cell_slab_free_face_is_inlet_outlet():
+    """C안의 성립 조건: 케이싱이 슬래브 측면을 전부 덮어
+       슬래브의 자유면이 입구(출구) 정확히 하나여야 함.
+       이것이 깨지면 Fluent 이 입구를 측면과 한 존으로 묶음(실측)."""
+    from fthx import presets, cell
+    p = presets.cell()
+    assy, m = cell.build(p)
+    B = {c.name: c.obj for c in assy.children}
+
+    def free_faces(nm):
+        others = [v for k, v in B.items() if k != nm]
+        out = []
+        for f in B[nm].Faces():
+            c = f.Center()
+            if not any(abs(f.Area() - h.Area()) < 1e-6
+                       and (c - h.Center()).Length < 1e-6
+                       for o in others for h in o.Faces()):
+                out.append((f.Area(), (c.x, c.y, c.z)))
+        return out
+
+    g = cell.cell_geometry(p)
+    for body, key in (("fluid_cell_slab_in", "cell_inlet"),
+                      ("fluid_cell_slab_out", "cell_outlet")):
+        ff = free_faces(body)
+        assert len(ff) == 1, f"{body} 자유면 {len(ff)}개 — 1개여야 함"
+        area, c = ff[0]
+        assert area == pytest.approx(g["Ly"] * g["Lz"], rel=1e-6)
+        assert c[0] == pytest.approx(m["face_seeds"][key][0], abs=1e-9)
+
+
+@needs_cad
 def test_cell_tubes_split_at_periodic_boundary():
     """y=0 에 놓인 관은 periodic 경계에 걸치므로 a/b 두 조각.
        둘을 합하면 온전한 관 하나(= 엇갈린 열의 관)와 체적이 같아야 함."""
@@ -1193,20 +1226,45 @@ def test_cell_air_spans_full_pitch():
         assert f"({p.operating.air.V_face} 0 0)" in u
 
 
-def test_cell_separation_moved_to_solver():
-    """메싱 API 에 좌표 기반 면존 분리가 없어 솔버로 이관함(B안).
-       메싱 저널은 메시 생성에만, 분리·개명은 솔버 저널에서."""
+def test_cell_labeling_by_slab_free_face():
+    """C안: 분리 API 없이 CAD 로 해결 — 슬래브 바디의 유일한 자유면이
+       곧 입구(출구)라서 이름만으로 확정됨. 좌표·면적 조회 불필요.
+       (B안 각도분리·좌표매칭은 API 부재로 폐기 — HANDOFF_v3 5절)"""
+    from fthx import presets, exporters
+    p = presets.cell()
+    js = exporters.cell_journal(p, area_m2=0.0019)
+    assert "separate-face-zone-by-angle" not in js   # 폐기된 B안 잔재 금지
+    assert "SOLVER_TUI" not in js
+    assert "INLET_SRC" in js and "fluid_cell_slab_in-solid" in js
+    # 순서: 계면 interior → 개명 → 타입 변경 → 측면 대칭
+    assert (js.index("3c. 공기-공기 계면") < js.index("3d. 입출구 개명")
+            < js.index("4. 입출구 타입") < js.index("5. 측면 대칭면"))
+    # 공기-공기 계면이 wall 로 남으면 유동이 막힘 (실측 2578722)
+    assert "interior" in js
+
+
+def test_cell_journal_step_fns_defined_before_use():
+    """실측 2578722: step("4...", _zone_types) 가 정의 없이 호출돼
+       저널이 3c 이후 통째로 죽고 케이스 저장도 안 됐음.
+       step() 에 넘기는 모든 이름은 그 줄보다 앞에 정의돼 있어야 함."""
+    import re
     from fthx import presets, exporters, cell
     p = presets.cell()
-    jm = exporters.cell_mesh_journal(p, n_bodies=7,
-                                     face_seeds=cell.build(p)[1]["face_seeds"])
-    js = exporters.cell_journal(p, area_m2=0.0019)
-    assert "12b." not in jm                      # 메싱에서는 분리하지 않음
-    assert "separate-face-zone-by-angle" in js   # 솔버에서 분리
-    assert "SOLVER_TUI" in js
-    # 분리 → 매칭·개명 → 타입 변경 순서
-    assert js.index("3b. 면 존 각도 분리") < js.index("3c. 좌표 매칭")
-    assert js.index("3c. 좌표 매칭") < js.index("4. 입출구 타입")
+    seeds = cell.build(p)[1]["face_seeds"]
+    for j in (exporters.cell_journal(p, area_m2=0.0019),
+              exporters.cell_mesh_journal(p, n_bodies=11, face_seeds=seeds)):
+        lines = j.splitlines()
+        defined = set()
+        for i, l in enumerate(lines):
+            for m in re.finditer(r'step\(\s*"[^"]*"\s*,\s*(\w+)\s*[),]', l):
+                nm = m.group(1)
+                if nm == "lambda":
+                    continue
+                assert nm in defined, (
+                    "%d행 step(...)이 미정의 이름 %s 를 참조" % (i + 1, nm))
+            dm = re.match(r"^\s*def (\w+)", l)   # if 블록 안 정의도 인정
+            if dm:
+                defined.add(dm.group(1))
 
 
 def test_journal_defines_helpers_before_use():

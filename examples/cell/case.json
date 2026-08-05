@@ -8,6 +8,8 @@
     "Ly": 25.4,
     "Lz": 1.8142857142857143,
     "periodic": true,
+    "slab_mm": 2.0,
+    "cap_mm": 0.5,
     "L_up": 44.0,
     "L_down": 88.0,
     "x_core": [
@@ -55,6 +57,7 @@
       "dz": 1.8142857142857143
     }
   ],
+  "side_boundary": "symmetry — y=0/Pt 는 관 중심을 지나는 거울면, z=0/Fp 는 핀 사이 중앙 거울면. staggered 도 성립",
   "face_seeds": {
     "cell_inlet": [
       0.0,
@@ -110,6 +113,6 @@
     },
     "thermal": "equilibrium"
   },
-  "note": "핀 실형상 · 포러스 없음. 전체 피치 + translational periodic — 입출구가 유일한 자유면.",
+  "note": "핀 실형상 · 포러스 없음. 전체 피치 + 끝단 슬래브 측면 케이싱(C안) — 슬래브의 자유면이 입구/출구 하나뿐이라 존이 저절로 분리됨. 측면은 거울 대칭면이므로 symmetry.",
   "overlap": []
 }

@@ -3,8 +3,10 @@
 #
 #   fluent 3ddp -g -t8 -i cell_setup.py
 #
-# 도메인 x 176.0 · y 25.40 (Pt/2) · z 1.814 (Fp/2) mm
-# 네 측면 모두 대칭면 — 주기 경계 불필요
+# 도메인 x 176.0 · y 25.40 (Pt) · z 1.814 (Fp) mm
+# C안: 끝단 슬래브(2.0mm) 측면을 케이싱으로 감쌈 —
+#      슬래브 자유면 = 입구/출구 뿐이라 존이 저절로 분리됨.
+# 측면은 거울 대칭면(y: 관 중심, z: 핀 사이 중앙) → symmetry
 # Re_Dh 489 (laminar) → 난류 모델 끔
 # 셀 추정 1502k · h_xy 0.25 · z 10+2층
 
@@ -27,7 +29,10 @@ AREA     = 0.001936552            # m2, 공기측 전열면적
 LAMINAR  = True
 CASE     = "cell_plain_cell"
 FACE_SEEDS = {"cell_inlet": [0.0, 12.7, 1.3894642857142858], "cell_outlet": [176.0, 12.7, 1.3894642857142858]}
-INLET_AREA_MM2 = 43.1619
+# 입구는 슬래브(핀 없음)의 자유면 — 전체 단면 Ly x Lz
+INLET_AREA_MM2 = 46.0829
+INLET_SRC  = "fluid_cell_slab_in-solid"    # C안: 이 바디의 유일한 자유면 = 입구
+OUTLET_SRC = "fluid_cell_slab_out-solid"
 
 def step(label, fn):
     print("=" * 60)
@@ -88,36 +93,17 @@ def _models():
         try_all("k-omega SST", [("kw_sst", lambda: t.define.models.viscous.kw_sst("yes"))])
 step("3. 에너지 + 점성 모델", _models)
 
-def SOLVER_TUI(cmd):
-    """솔버에서 TUI 문자열 실행. 후보를 순서대로 시도."""
-    g = globals()
-    last = None
-    for nm in ("solver", "session", "root"):
-        o = g.get(nm)
-        if o is None:
-            continue
-        for attr in ("execute_tui", "exec_tui"):
-            fn = getattr(o, attr, None)
-            if fn is None:
-                continue
-            try:
-                return fn(cmd)
-            except Exception as ex:
-                last = "%s.%s: %s" % (nm, attr, str(ex)[:90])
-    raise NameError("solver execute_tui 없음 (%s)" % last)
+def _walls():
+    """shadow 짝이 있는 존은 conjugate 벽 — 목록과 함께 돌려줌."""
+    S = SETTINGS()
+    bc = S.setup.boundary_conditions
+    walls = list(bc.wall)
+    shadows = set(w for w in walls if w.endswith("-shadow"))
+    plain = [w for w in walls if not w.endswith("-shadow")]
+    return plain, shadows
 
-def _separate_faces():
-    """존 목록 확인만. 분리는 불필요함이 확인됨.
-
-    실측 존 목록:
-      fluid_cell_up-solid:1      +  fluid_cell_up-solid:36958
-      fluid_cell_core-solid:1    +  fluid_cell_core-solid:50009
-      fluid_cell_core-solid-2-:1 +  fluid_cell_core-solid-2-:58611
-      fluid_cell_down-solid:1    +  fluid_cell_down-solid:49349
-    바디마다 이미 두 존으로 나뉘어 있음. '-2-' 는 코어 공기가 핀 위/아래
-    두 덩이로 갈린 것 — 형상이 의도대로 만들어진 증거.
-    separate-face-zone-by-angle / sep-face-zone-by-angle 은 둘 다 없음.
-    """
+def _zone_survey():
+    """타입별 존 목록 — 진단용."""
     S = SETTINGS()
     bc = S.setup.boundary_conditions
     for t_ in ("wall", "velocity_inlet", "pressure_outlet",
@@ -131,119 +117,96 @@ def _separate_faces():
         print("    %-16s %d개" % (t_, len(zs)))
         for z in zs:
             print("      %s" % z)
+step("3b. 존 조사", _zone_survey)
 
-def _match_and_rename():
-    """면적 + 좌표로 입출구 존을 찾아 이름을 붙임.
+def _air_air_interior():
+    """공기-공기 계면을 interior 로.
 
-    입구면 면적은 형상에서 알고 있음(y x z 에서 핀 두께 제외).
-    좌표를 못 얻어도 면적만으로 후보가 좁혀짐.
-    """
-    S = SETTINGS()
-    bc = S.setup.boundary_conditions
-    print("    face_seeds: %s" % FACE_SEEDS)
-    print("    입구면 기대 면적 %.2f mm2" % INLET_AREA_MM2)
-    try:
-        zones = [z for z in list(bc.wall) if "shadow" not in z]
-    except Exception as ex:
-        print("    wall 목록 실패: %s" % ex)
-        return
-    print("    후보 wall 존 %d개" % len(zones))
-
+    실측(2578722): fluid_cell_core-solid-fluid_cell_up-solid 등이
+    wall(+shadow) 로 들어와 있었음 — 이대로면 상류→코어 유동이 막힘.
+    이름에 fluid_cell 이 두 번 나오는 벽이 공기-공기 계면임.
+    (solid_cap 계면·핀 계면은 conjugate 벽으로 남겨야 하므로 제외됨)"""
     t = TUI()
-    si = getattr(getattr(t, "report", None), "surface_integrals", None)
-    print("    surface_integrals: %s" % ("있음" if si else "없음"))
-    tmp = os.path.join(_HERE, "_c.txt")
+    plain, _ = _walls()
+    tgt = [w for w in plain if w.count("fluid_cell") >= 2]
+    print("    공기-공기 계면 %d개" % len(tgt))
+    for w in tgt:
+        try_all("%s -> interior" % w, [
+            ("zone_type interior", lambda ww=w:
+                t.define.boundary_conditions.zone_type(ww, "interior")),
+            ("modify_zones.zone_type", lambda ww=w:
+                t.define.boundary_conditions.modify_zones.zone_type(
+                    ww, "interior")),
+        ])
+step("3c. 공기-공기 계면 -> interior", _air_air_interior)
 
-    def integ(zone, field, fn_name="area_weighted_avg"):
-        fn = getattr(si, fn_name, None) if si else None
-        if fn is None:
-            return None
-        if os.path.exists(tmp):
-            os.remove(tmp)
-        for args in ((zone, "()", field, "yes", tmp, "yes"),
-                     (zone, "()", field, "yes", tmp),
-                     (zone, field, "yes", tmp)):
-            try:
-                fn(*args)
-                break
-            except Exception:
-                continue
-        try:
-            for line in open(tmp).read().splitlines():
-                for tok in line.split()[::-1]:
-                    try:
-                        return float(tok)
-                    except ValueError:
-                        continue
-        except Exception:
-            return None
-        return None
+def _rename_io():
+    """입출구 개명 — C안: 슬래브 바디의 유일한 자유면이 곧 입구(출구).
 
-    # 첫 존으로 인자 형식을 확인
-    if zones:
-        v = integ(zones[0], "x-coordinate")
-        print("    시험: %s x-coordinate -> %s" % (zones[0], v))
+    좌표·면적 조회가 전혀 필요 없음. 슬래브 측면은 케이싱과의 conjugate
+    벽(shadow 짝 있음), 흐름 방향 면은 공기-공기 계면(위에서 interior)이므로
+    남는 자유면 벽은 정확히 하나임. (형상 회귀 테스트로 고정됨)"""
+    t = TUI()
+    plain, shadows = _walls()
+    print("    입구면 기대 면적 %.2f mm2 (검산용)" % INLET_AREA_MM2)
+    for src, dst in ((INLET_SRC, "cell_inlet"), (OUTLET_SRC, "cell_outlet")):
+        cand = [w for w in plain
+                if w.startswith(src)                    # 해당 슬래브 바디의 존
+                and "-solid-" not in w[len(src):]       # 계면 제외
+                and (w + "-shadow") not in shadows]     # conjugate 벽 제외
+        print("    %s 후보: %s" % (dst, cand))
+        if len(cand) != 1:
+            print("    [!!] 후보가 %d개 — 개명 보류. 존 조사(3b) 출력 확인 요망"
+                  % len(cand))
+            continue
+        try_all("%s -> %s" % (cand[0], dst), [
+            ("modify_zones.zone_name", lambda a=cand[0], b=dst:
+                t.define.boundary_conditions.modify_zones.zone_name(a, b)),
+            ("zone_name", lambda a=cand[0], b=dst:
+                t.define.boundary_conditions.zone_name(a, b)),
+        ])
+step("3d. 입출구 개명 (슬래브 자유면)", _rename_io)
 
-    info = {}
-    for z in zones:
-        xs = integ(z, "x-coordinate")
-        ar = integ(z, "area", "area")
-        info[z] = (xs, ar)
-        print("      %-44s x %s  area %s" % (z, xs, ar))
-
-    got = [(z, v[0]) for z, v in info.items() if v[0] is not None]
-    print("    x 좌표 획득 %d/%d" % (len(got), len(zones)))
-    if not got:
-        print("    좌표를 못 얻음 — 이름 규칙으로 대체 시도")
-        return
-    for key, sd in FACE_SEEDS.items():
-        best, bd = None, 1e18
-        for z, xv in got:
-            d = abs(xv * 1000.0 - sd[0])
-            if d < bd:
-                best, bd = z, d
-        print("    %-14s -> %-44s |dx| %.3f mm" % (key, best, bd))
-        if best and bd < 1.0:
-            try_all("rename %s" % key, [
-                ("tui zone-name", lambda b=best, k=key: SOLVER_TUI(
-                    "/define/boundary-conditions/modify-zones/"
-                    "zone-name %s %s" % (b, k))),
-            ])
-
-step("3b. 면 존 각도 분리 (B안)", _separate_faces)
-step("3c. 좌표 매칭 + 개명", _match_and_rename)
+def _zone_types():
+    """메싱에서 이름만 바뀐 존은 솔버에서 전부 wall — 타입을 바꿔야 BC 가 걸림.
+       (실측 2578722: 이 함수가 정의 없이 호출돼 저널이 3c 에서 죽었음 —
+        헬퍼는 반드시 첫 호출보다 앞에. 회귀 테스트로 고정됨)"""
+    t = TUI()
+    for zone, typ in (("cell_inlet", "velocity-inlet"),
+                      ("cell_outlet", "pressure-outlet")):
+        try_all("%s -> %s" % (zone, typ), [
+            ("define.boundary_conditions.zone_type",
+             lambda z=zone, y=typ: t.define.boundary_conditions.zone_type(z, y)),
+            ("modify_zones.zone_type",
+             lambda z=zone, y=typ:
+                 t.define.boundary_conditions.modify_zones.zone_type(z, y)),
+        ])
 step("4. 입출구 타입", _zone_types)
 
 def _sym_walls():
-    """입출구가 아닌 fluid 자유면을 periodic 으로.
+    """남은 fluid 자유면(측면)을 symmetry 로.
 
-    전체 피치 도메인이므로 y=0↔y=Pt, z=0↔z=Fp 가 translational periodic 임.
-    (대칭 1/4 로는 Fluent 이 입구면을 분리해주지 않았고, meshing_utilities 에
-     좌표 기반 면존 분리 함수가 없음을 실측 확인 — 그래서 전체 피치로 전환)"""
-    S = SETTINGS()
-    bc = S.setup.boundary_conditions
+    y=0/Pt 는 관 중심을 지나는 거울면(staggered 도 성립),
+    z=0/Fp 는 핀 사이 중앙 거울면 — 기하적으로 정확한 대칭이므로
+    짝 맞춤이 필요한 periodic 대신 symmetry 를 씀.
+    conjugate 벽(shadow 짝 있음 — 핀 전연·케이싱 계면)은 제외."""
     t = TUI()
-    try:
-        walls = list(bc.wall)
-    except Exception as ex:
-        print("    wall 목록 실패: %s" % ex)
-        return
-    print("    wall 존 %d개" % len(walls))
-    for w in walls:
-        print("      %s" % w)
-    # 고체 내부 계면(-solid- 포함)은 conjugate 이므로 건드리지 않음.
-    # 바디의 바깥 자유면(':' 로 끝나는 것)만 symmetry 로.
-    for w in walls:
-        if "-solid-" in w:
+    plain, shadows = _walls()
+    for w in plain:
+        if "-solid-" in w or "fluid_cell" not in w:
+            continue                      # 고체 자유면은 단열 wall 로 둠
+        if w in ("cell_inlet", "cell_outlet"):
             continue
-        if "fluid_cell" not in w:
-            continue          # 고체 바깥면은 단열 wall 로 둬도 무방
-        try_all("%s -> periodic" % w, [
-            ("zone_type periodic", lambda ww=w:
-                t.define.boundary_conditions.zone_type(ww, "periodic")),
+        if (w + "-shadow") in shadows:
+            continue                      # conjugate 벽 (핀 전연 등)
+        try_all("%s -> symmetry" % w, [
             ("zone_type symmetry", lambda ww=w:
-                t.define.boundary_conditions.zone_type(ww, "symmetry"))])
-step("5. 대칭면", _sym_walls)
+                t.define.boundary_conditions.zone_type(ww, "symmetry")),
+            ("modify_zones.zone_type", lambda ww=w:
+                t.define.boundary_conditions.modify_zones.zone_type(
+                    ww, "symmetry")),
+        ])
+step("5. 측면 대칭면", _sym_walls)
 
 def _bc():
     S = SETTINGS()
