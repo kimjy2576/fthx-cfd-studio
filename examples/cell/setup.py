@@ -16,7 +16,7 @@ try:
 except NameError:
     _HERE = os.getcwd()
 
-MESH_IN  = os.path.join(_HERE, r"cell_labeled.msh.h5")
+MESH_IN  = os.path.join(_HERE, r"cell.msh.h5")
 CASE_OUT = os.path.join(_HERE, r"cell.cas.h5")
 ITER     = int(os.environ.get("FTHX_ITER", "0"))
 U_MAX    = 2.869315     # m/s, 최소유동면적 기준
@@ -86,6 +86,126 @@ def _models():
         try_all("k-omega SST", [("kw_sst", lambda: t.define.models.viscous.kw_sst("yes"))])
 step("3. 에너지 + 점성 모델", _models)
 
+def SOLVER_TUI(cmd):
+    """솔버에서 TUI 문자열 실행. 후보를 순서대로 시도."""
+    g = globals()
+    last = None
+    for nm in ("solver", "session", "root"):
+        o = g.get(nm)
+        if o is None:
+            continue
+        for attr in ("execute_tui", "exec_tui"):
+            fn = getattr(o, attr, None)
+            if fn is None:
+                continue
+            try:
+                return fn(cmd)
+            except Exception as ex:
+                last = "%s.%s: %s" % (nm, attr, str(ex)[:90])
+    raise NameError("solver execute_tui 없음 (%s)" % last)
+
+def _separate_faces():
+    """B안: 각도로 면 존을 분리.
+
+    입구면과 측면은 정확히 90도이므로 40도 기준이면 깨끗이 갈라짐.
+    probe 에서 각도 분리가 이름을 p-plane-N 으로 파괴했으나, 여기서는
+    **분리 후 좌표로 다시 찾으므로** 이름이 바뀌어도 무방함.
+
+    메싱 API 에는 좌표 기반 면존 분리가 없음이 실측 확인됨 —
+    그래서 솔버의 오래된 TUI 명령을 씀.
+    """
+    S = SETTINGS()
+    bc = S.setup.boundary_conditions
+    try:
+        walls = [w for w in list(bc.wall) if "fluid_cell" in w]
+    except Exception as ex:
+        print("    wall 목록 실패: %s" % ex)
+        return
+    print("    분리 대상: %s" % walls)
+    for w in walls:
+        try_all("분리 %s" % w, [
+            ("mesh/modify-zones/separate-face-zone-by-angle",
+             lambda ww=w: SOLVER_TUI(
+                 "/mesh/modify-zones/separate-face-zone-by-angle %s 40 ()" % ww)),
+            ("separate-face-zone-by-angle (인자2)",
+             lambda ww=w: SOLVER_TUI(
+                 "/mesh/modify-zones/separate-face-zone-by-angle %s 40" % ww)),
+            ("tui 객체 경로",
+             lambda ww=w: TUI().mesh.modify_zones
+                 .separate_face_zone_by_angle(ww, 40)),
+        ])
+    # 분리 후 목록
+    try:
+        after = [w for w in list(bc.wall)]
+        print("    분리 후 wall %d개: %s" % (len(after), after[:14]))
+    except Exception as ex:
+        print("    재조회 실패: %s" % ex)
+
+def _match_and_rename():
+    """분리된 존을 좌표로 찾아 입출구 이름을 붙임."""
+    S = SETTINGS()
+    bc = S.setup.boundary_conditions
+    mu = globals().get("meshing_utilities")
+    print("    face_seeds: %s" % FACE_SEEDS)
+    try:
+        zones = list(bc.wall)
+    except Exception as ex:
+        print("    wall 목록 실패: %s" % ex)
+        return
+    # 솔버에서 존 중심 얻기 — surface_integrals 로 좌표 평균
+    t = TUI()
+    si = getattr(getattr(t, "report", None), "surface_integrals", None)
+    if si is None:
+        print("    surface_integrals 없음 — 좌표 매칭 불가")
+        return
+    tmp = os.path.join(_HERE, "_c.txt")
+    cent = {}
+    for z in zones:
+        cs = []
+        for fld in ("x-coordinate", "y-coordinate", "z-coordinate"):
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            ok = False
+            for args in ((z, "()", fld, "yes", tmp, "yes"),
+                         (z, "()", fld, "yes", tmp)):
+                try:
+                    si.area_weighted_avg(*args)
+                    ok = True
+                    break
+                except Exception:
+                    pass
+            v = None
+            if ok:
+                try:
+                    for line in open(tmp).read().splitlines():
+                        for tok in line.split()[::-1]:
+                            try:
+                                v = float(tok)
+                                break
+                            except ValueError:
+                                continue
+                        if v is not None:
+                            break
+                except Exception:
+                    pass
+            cs.append(v)
+        if all(c is not None for c in cs):
+            cent[z] = [c * 1000.0 for c in cs]   # m -> mm
+            print("      %-44s %s" % (z, [round(c, 2) for c in cent[z]]))
+    for key, sd in FACE_SEEDS.items():
+        best, bd = None, 1e18
+        for z, c in cent.items():
+            d = sum((c[i] - sd[i]) ** 2 for i in range(3)) ** 0.5
+            if d < bd:
+                best, bd = z, d
+        print("    %-14s -> %-40s 거리 %.3f mm" % (key, best, bd))
+        if best and bd < 1.0:
+            try_all("rename %s" % key, [
+                ("tui zone name", lambda b=best, k=key:
+                    SOLVER_TUI("/define/boundary-conditions/modify-zones/"
+                               "zone-name %s %s" % (b, k))),
+            ])
+
 def _zone_types():
     """입출구만 이름으로 찾아 타입을 바꿈.
 
@@ -98,6 +218,8 @@ def _zone_types():
         try_all("%s -> %s" % (z, ty), [
             ("zone_type", lambda a=z, b=ty:
                 t.define.boundary_conditions.zone_type(a, b))])
+step("3b. 면 존 각도 분리 (B안)", _separate_faces)
+step("3c. 좌표 매칭 + 개명", _match_and_rename)
 step("4. 입출구 타입", _zone_types)
 
 def _sym_walls():
