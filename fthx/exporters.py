@@ -1595,19 +1595,36 @@ step("1. 메시 읽기", lambda: try_all("read-mesh", [
 ])[0] or (_ for _ in ()).throw(RuntimeError("메시를 읽지 못함")))
 
 def _dump_menu():
-    """추측을 멈추고 실제 메뉴를 본다 — /boundary/separate 하위 전체."""
+    """추측을 멈추고 실제를 본다 — separate 메뉴 + 오브젝트 세계.
+
+    v1 실측(2579688): 명령 9종이 전부 실재하는데 7개 인자 변형이 모두
+    존 수 27->27 로 조용히 실패. 가설 2개를 이번에 가름:
+      (a) 인자/프롬프트 형식 불일치 ("Invalid entity")
+      (b) watertight 산출물이라 존이 mesh object 소유 — /boundary/ 직접
+          조작 거부, /objects/ 경로로 가야 함"""
     try_all("메뉴 덤프", [
         ("exec /boundary/separate", lambda: TUI_EXEC("/boundary/separate q")),
-        ("exec /boundary/separate/", lambda: TUI_EXEC("/boundary/separate/")),
     ])
     t = TUI()
     sep = getattr(getattr(t, "boundary", None), "separate", None)
     if sep is not None:
         print("    tui.boundary.separate 하위: %s"
               % [x for x in dir(sep) if not x.startswith("_")])
-    else:
-        print("    tui.boundary.separate 객체 없음 (문자열 TUI 로만 시도)")
-step("2. /boundary/separate 메뉴 확인", _dump_menu)
+    obj = getattr(t, "objects", None)
+    if obj is not None:
+        print("    tui.objects 하위(sep 관련): %s"
+              % [x for x in dir(obj) if "sep" in x or "list" in x])
+    # 오브젝트 소유 가설 (b) 검증 — 오브젝트 목록
+    mu = _MU()
+    try_all("오브젝트 목록", [
+        ("mu.get_all_object_name_list", lambda:
+            mu.get_all_object_name_list() if mu else None),
+        ("mu.get_object_name_list_of_type mesh", lambda:
+            mu.get_object_name_list_of_type(object_type="mesh") if mu else None),
+        ("exec /objects/list-objects", lambda:
+            TUI_EXEC("/objects/list-objects") or True),
+    ])
+step("2. 메뉴 + 오브젝트 세계 확인", _dump_menu)
 
 step("3. 분리 전 존 목록", lambda: dump_zones("before"))
 
@@ -1627,6 +1644,81 @@ def _already_split():
             return _nm
     return None
 
+WINNER = []      # 입구에서 찾은 레시피를 출구에 재사용
+
+def _variants(zid, zname, x, y, w, box):
+    """(이름, 실행자) 목록 — v1 에서 전부 실패한 형식은 뺐음.
+
+    v1 오류 "Invalid entity. Error object: 29" 는 인자가 토큰별로
+    거부된 것 — 리스트 문법 (id), 비인용 이름, yes 종결, 그리고
+    entity 문법을 아예 우회하는 mark 경로(좌표 박스)를 추가."""
+    t = TUI()
+    sep = getattr(getattr(t, "boundary", None), "separate", None)
+    obj = getattr(t, "objects", None)
+    V = []
+
+    def S(name, cmd):
+        V.append((name, ("cmd", cmd)))
+
+    # ── (a) 인자 형식 변형 ──
+    S("angle 리스트 (id)", "/boundary/separate/sep-face-zone-by-angle (%s) %g yes"
+      % (zid, ANGLE))
+    S("angle 리스트 (이름)", "/boundary/separate/sep-face-zone-by-angle (%s) %g yes"
+      % (zname, ANGLE))
+    S("angle 이름 비인용", "/boundary/separate/sep-face-zone-by-angle %s %g yes"
+      % (zname, ANGLE))
+    S("seed 리스트+좌표", "/boundary/separate/sep-face-zone-by-seed (%s) %g %g %g"
+      % (zid, x, y, w))
+    S("seed 이름 비인용", "/boundary/separate/sep-face-zone-by-seed %s %g %g %g"
+      % (zname, x, y, w))
+    # ── (a2) mark 경로 — entity 문법 우회, 좌표 박스로 마킹 후 분리 ──
+    x0, x1, y0, y1, z0, z1 = box
+    V.append(("mark 3연타(정의-마킹-분리)", ("mark",
+        ["/boundary/separate/local-regions/define inlet-box box %g %g %g %g %g %g"
+         % (x0, x1, y0, y1, z0, z1),
+         "/boundary/separate/local-regions/define inlet-box box (%g %g %g) (%g %g %g)"
+         % (x0, y0, z0, x1, y1, z1),
+         "/boundary/separate/mark-faces-in-region %s inlet-box yes" % zid,
+         "/boundary/separate/mark-faces-in-region (%s) inlet-box yes" % zid,
+         "/boundary/separate/sep-face-zone-by-mark %s yes" % zid,
+         "/boundary/separate/sep-face-zone-by-mark (%s) yes" % zid])))
+    # ── (b) 오브젝트 경로 ──
+    if obj is not None:
+        for fn_nm in ("separate_faces_by_seed", "separate_faces_by_angle"):
+            fn = have(obj, fn_nm)
+            if fn is None:
+                continue
+            if "seed" in fn_nm:
+                V.append(("objects.%s" % fn_nm, ("call", fn, ("*", x, y, w))))
+            else:
+                V.append(("objects.%s" % fn_nm, ("call", fn, ("*", ANGLE))))
+    if sep is not None:
+        fn = have(sep, "sep_face_zone_by_angle")
+        if fn is not None:
+            V.append(("obj sep_by_angle(id,ANGLE)", ("call", fn, (zid, ANGLE))))
+    return V
+
+def _run_variant(kind_payload, n0):
+    kind = kind_payload[0]
+    if kind == "cmd":
+        cmd = kind_payload[1]
+        print("      cmd: %s" % cmd)           # 오류문 귀속용 marker
+        TUI_EXEC(cmd)
+    elif kind == "mark":
+        for cmd in kind_payload[1]:
+            print("      cmd: %s" % cmd)
+            try:
+                TUI_EXEC(cmd)
+            except Exception as e:
+                print("      (계속) %s: %s" % (type(e).__name__, str(e)[:90]))
+    elif kind == "call":
+        fn, args = kind_payload[1], kind_payload[2]
+        print("      call: %s%s" % (getattr(fn, "__name__", fn), args))
+        fn(*args)
+    n1 = len(zone_table())
+    print("      존 수 %d -> %d" % (n0, n1))
+    return n1 > n0        # 존이 늘어야 성공 — 조용한 실패 방지
+
 def _separate(prefix, seed, label):
     z = _find_target(prefix)
     if z is None:
@@ -1637,44 +1729,19 @@ def _separate(prefix, seed, label):
     print("    대상: id %s  %s  area %s  seed (%g %g %g)"
           % (zid, zname, zarea, x, y, w))
     n0 = len(zone_table())
-
-    def run(cmd):
-        TUI_EXEC(cmd)
-        n1 = len(zone_table())
-        print("      존 수 %d -> %d" % (n0, n1))
-        return n1 > n0        # 존이 늘어야 성공 — 조용한 실패 방지
-
-    t = TUI()
-    sep = getattr(getattr(t, "boundary", None), "separate", None)
-
-    def run_obj(fn_name, *args):
-        fn = have(sep, fn_name) if sep is not None else None
-        if fn is None:
-            return False
-        fn(*args)
-        n1 = len(zone_table())
-        print("      존 수 %d -> %d" % (n0, n1))
-        return n1 > n0
-
-    try_all("%s seed 분리" % label, [
-        ("seed-angle id str", lambda: run(
-            "/boundary/separate/sep-face-zone-by-seed-angle %s %g %g %g %g"
-            % (zid, x, y, w, ANGLE))),
-        ("seed id str", lambda: run(
-            "/boundary/separate/sep-face-zone-by-seed %s %g %g %g"
-            % (zid, x, y, w))),
-        ("seed-angle name str", lambda: run(
-            '/boundary/separate/sep-face-zone-by-seed-angle "%s" %g %g %g %g'
-            % (zname, x, y, w, ANGLE))),
-        ("seed name str", lambda: run(
-            '/boundary/separate/sep-face-zone-by-seed "%s" %g %g %g'
-            % (zname, x, y, w))),
-        ("obj seed_angle", lambda: run_obj(
-            "sep_face_zone_by_seed_angle", zid, x, y, w, ANGLE)),
-        ("obj seed", lambda: run_obj("sep_face_zone_by_seed", zid, x, y, w)),
-        ("angle id str (차선)", lambda: run(
-            "/boundary/separate/sep-face-zone-by-angle %s %g" % (zid, ANGLE))),
-    ])
+    # seed 를 감싸는 작은 박스 (면 두께 방향 여유 ±0.3mm)
+    box = (x - 0.3, x + 0.3, -1.0, 30.0, -1.0, 3.0)
+    if WINNER:
+        nm = WINNER[0]
+        vs = [(n, pl) for n, pl in _variants(zid, zname, x, y, w, box) if n == nm]
+        print("    입구에서 찾은 레시피 재사용: %s" % nm)
+    else:
+        vs = _variants(zid, zname, x, y, w, box)
+    won, _ = try_all("%s 분리" % label,
+                     [(n, (lambda pl=pl: _run_variant(pl, n0)))
+                      for n, pl in vs])
+    if won and not WINNER:
+        WINNER.append(won)
 
 def _separations():
     hit = _already_split()
@@ -1683,7 +1750,7 @@ def _separations():
         return
     _separate("fluid_cell_up",   SEEDS["cell_inlet"],  "입구")
     _separate("fluid_cell_down", SEEDS["cell_outlet"], "출구")
-step("4. seed 분리 시도", _separations)
+step("4. 분리 시도 (형식 변형 + mark + objects)", _separations)
 
 def _after():
     tz = dump_zones("after")
@@ -1692,8 +1759,10 @@ def _after():
           % (INLET_AREA_MM2, len(hits), [h[1] for h in hits]))
 step("5. 분리 후 존 목록 + 면적 판정", _after)
 
+RENAMED = []
+
 def _rename():
-    """면적이 맞는 조각을 seed x 좌표로 입/출구 구분해 개명."""
+    """면적이 맞는 조각을 바디 이름으로 입/출구 구분해 개명."""
     mu = _MU()
     if mu is None:
         print("    meshing_utilities 없음 — 개명 생략")
@@ -1706,17 +1775,25 @@ def _rename():
     # up 바디 조각 = 입구(x=0), down 바디 조각 = 출구(x=Lx)
     for i, nm, _ar in hits:
         dst = "cell_inlet" if nm.startswith("fluid_cell_up") else "cell_outlet"
-        try_all("%s -> %s" % (nm, dst), [
+        won, _ = try_all("%s -> %s" % (nm, dst), [
             ("rename_face_zone", lambda a=nm, b=dst:
                 mu.rename_face_zone(zone_name=a, new_name=b) or True),
         ])
+        if won:
+            RENAMED.append(dst)
 step("6. 개명", _rename)
 
-step("7. 저장 (원본 보존, 별도 파일)", lambda: try_all("write-mesh", [
-    ("tui file.write_mesh", lambda: TUI().file.write_mesh(MESH_OUT)),
-    ("exec /file/write-mesh", lambda: TUI_EXEC(
-        '/file/write-mesh "%s"' % MESH_OUT)),
-]))
+def _save():
+    """개명까지 성공했을 때만 저장 — 270MB 무의미 재저장 방지 (v1 교훈)."""
+    if len(RENAMED) != 2:
+        print("    개명 %d/2 — 저장 생략 (프로브 결과는 로그로 판단)" % len(RENAMED))
+        return
+    try_all("write-mesh", [
+        ("tui file.write_mesh", lambda: TUI().file.write_mesh(MESH_OUT)),
+        ("exec /file/write-mesh", lambda: TUI_EXEC(
+            '/file/write-mesh "%s"' % MESH_OUT)),
+    ])
+step("7. 저장 (개명 성공시에만, 원본 보존)", _save)
 
 def _verify():
     import time
@@ -1738,6 +1815,213 @@ try:
 except Exception:
     try:
         TUI_EXEC("/exit yes")
+    except Exception:
+        pass
+'''
+
+
+def cell_bsep_journal(p: FTHXParams, mesh_in: str = "cell.msh.h5") -> str:
+    """B안 프로브 — 솔버 mesh/modify-zones/sep-face-zone-angle.
+
+      fluent 3ddp -g -t8 -i sep_solver.py   (STAGE=bsep ./go.sh cell 8)
+
+    문헌 근거: 정식 명령명은 sep-face-zone-angle ("by" 없음) —
+    Fluent 6.3 TCL 목록부터 2026R1 settings API
+    (mesh.modify_zones.sep_face_zone_angle(face_zone_name, angle,
+    move_faces)) 까지 연속 존재. 지난 시도는 전부 "by" 오기였음.
+    읽기만 하는 프로브 — 저장하지 않음. 성공 판정 = wall 존 수 증가."""
+    from . import cell as CELL
+    g = CELL.cell_geometry(p)
+    inlet_mm2 = g["Ly"] * g["Lz"]
+
+    return f'''# -*- coding: utf-8 -*-
+# B안 프로브 — 솔버 sep-face-zone-angle ("by" 없는 정식 명령명)
+#
+#   fluent 3ddp -g -t8 -i sep_solver.py
+#
+# 읽기만 함 — 저장 없음. 성공 판정 = wall 존 수 증가 + 46.08mm2 조각.
+
+import os
+import traceback
+
+try:
+    _HERE = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    _HERE = os.getcwd()
+
+MESH_IN = os.path.join(_HERE, r"{mesh_in}")
+ANGLE   = 40.0
+INLET_AREA_MM2 = {inlet_mm2:.4f}
+
+def step(label, fn):
+    print("=" * 60)
+    print(">>> " + label)
+    try:
+        fn()
+        print("<<< OK   " + label)
+        return True
+    except Exception as e:
+        print("<<< FAIL " + label + " : " + type(e).__name__ + ": " + str(e)[:300])
+        traceback.print_exc()
+        return False
+
+def TUI():
+    g = globals()
+    for nm in ("tui", "solver", "session", "root"):
+        o = g.get(nm)
+        if o is None:
+            continue
+        if nm == "tui":
+            return o
+        t = getattr(o, "tui", None)
+        if t is not None:
+            return t
+    raise NameError("TUI 진입점 없음")
+
+def SETTINGS():
+    g = globals()
+    for nm in ("solver", "session", "root"):
+        o = g.get(nm)
+        if o is not None and getattr(o, "settings", None) is not None:
+            return o.settings
+    raise NameError("settings 없음")
+
+def try_all(label, trials):
+    print("  == " + label)
+    for name, fn in trials:
+        try:
+            out = fn()
+            if out is False or out is None:
+                print("    [--] " + name + " -> " + str(out))
+                continue
+            print("    [OK] " + name)
+            return name, out
+        except Exception as ex:
+            print("    [--] " + name + " : " + type(ex).__name__ + ": " + str(ex)[:110])
+    return None, None
+
+step("1. 메시 읽기", lambda: TUI().file.read_case(MESH_IN) or True)
+
+def _walls():
+    S = SETTINGS()
+    return [w for w in list(S.setup.boundary_conditions.wall)
+            if not w.endswith("-shadow")]
+
+def _dump(tag):
+    ws = _walls()
+    print("    [%s] wall %d개" % (tag, len(ws)))
+    for w in ws:
+        print("      %s" % w)
+    return ws
+
+step("2. 분리 전 wall 목록", lambda: _dump("before"))
+
+def _mz():
+    """settings 쪽 modify_zones 유무 + 하위 실물 덤프."""
+    S = SETTINGS()
+    mz = getattr(getattr(S, "mesh", None), "modify_zones", None)
+    if mz is None:
+        print("    settings.mesh.modify_zones 없음 (25.1 미승격일 수 있음)")
+        return
+    subs = [x for x in dir(mz) if "sep" in x or x in ("zone_name", "zone_type",
+                                                      "make_periodic")]
+    print("    settings.mesh.modify_zones 하위(발췌): %s" % subs)
+step("3. settings modify_zones 실물", _mz)
+
+WINNER = []
+
+def _sep(zone, label):
+    n0 = len(_walls())
+    print("    대상: %s  (wall %d개)" % (zone, n0))
+    t = TUI()
+    S = SETTINGS()
+    mz_t = getattr(getattr(t, "mesh", None), "modify_zones", None)
+    mz_s = getattr(getattr(S, "mesh", None), "modify_zones", None)
+
+    def chk(_ret):
+        n1 = len(_walls())
+        print("      존 수 %d -> %d" % (n0, n1))
+        return n1 > n0
+
+    trials = [
+        ("tui sep_face_zone_angle(name,ANGLE)", lambda:
+            chk(mz_t.sep_face_zone_angle(zone, ANGLE)) if mz_t else False),
+        ("settings sep_face_zone_angle(name,ANGLE)", lambda:
+            chk(mz_s.sep_face_zone_angle(face_zone_name=zone, angle=ANGLE))
+            if mz_s else False),
+        ("settings +move_faces=False", lambda:
+            chk(mz_s.sep_face_zone_angle(face_zone_name=zone, angle=ANGLE,
+                                         move_faces=False)) if mz_s else False),
+        ("settings +move_faces=True", lambda:
+            chk(mz_s.sep_face_zone_angle(face_zone_name=zone, angle=ANGLE,
+                                         move_faces=True)) if mz_s else False),
+    ]
+    if WINNER:
+        trials = [(n, f) for n, f in trials if n == WINNER[0]]
+        print("    입구에서 찾은 레시피 재사용: %s" % WINNER[0])
+    won, _ = try_all("%s 분리" % label, trials)
+    if won and not WINNER:
+        WINNER.append(won)
+
+step("4. 분리 시도 (입구 존)",
+     lambda: _sep("fluid_cell_up-solid:1", "입구"))
+step("5. 분리 시도 (출구 존)",
+     lambda: _sep("fluid_cell_down-solid:1", "출구"))
+
+def _areas():
+    """분리 조각 면적 — 46.08mm2(=4.608e-5 m2) 조각이 입구.
+    v1(2578722)에서 면적을 19존 전부 얻어낸 것과 동일한 TUI 체인."""
+    t = TUI()
+    si = getattr(getattr(t, "report", None), "surface_integrals", None)
+    tmp = os.path.join(_HERE, "_a.txt")
+
+    def area_of(zone):
+        fn = getattr(si, "area", None) if si else None
+        if fn is None:
+            return None
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        for args in ((zone, "()", "yes", tmp, "yes"),
+                     (zone, "()", "yes", tmp),
+                     (zone, "yes", tmp)):
+            try:
+                fn(*args)
+                break
+            except Exception:
+                continue
+        try:
+            for line in open(tmp).read().splitlines():
+                for tok in line.split()[::-1]:
+                    try:
+                        return float(tok)
+                    except ValueError:
+                        continue
+        except Exception:
+            return None
+        return None
+
+    hits = []
+    for w in _dump("after"):
+        if "fluid_cell_up" not in w and "fluid_cell_down" not in w:
+            continue
+        a = area_of(w)
+        print("      %-46s area %s" % (w, a))
+        if a is not None and any(
+                abs(a - INLET_AREA_MM2 * s) / (INLET_AREA_MM2 * s) < 0.02
+                for s in (1.0, 1e-6)):
+            hits.append(w)
+    print("    기대 면적(%.2f mm2) 일치 존 %d개: %s"
+          % (INLET_AREA_MM2, len(hits), hits))
+step("6. 조각 면적 판정", _areas)
+
+print("=" * 60)
+print("BSEP 완료 (프로브 — 저장 없음)")
+print("=" * 60)
+try:
+    TUI().exit("yes")
+except Exception:
+    try:
+        TUI().exit()
     except Exception:
         pass
 '''

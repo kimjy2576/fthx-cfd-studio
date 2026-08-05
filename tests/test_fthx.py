@@ -1127,17 +1127,23 @@ def test_cell_journals_valid():
     jm = exporters.cell_mesh_journal(p, n_bodies=6, face_seeds=seeds)
     js = exporters.cell_journal(p, area_m2=0.00051)
     jl = exporters.cell_label_journal(p, face_seeds=seeds)
+    jb = exporters.cell_bsep_journal(p)
     ast.parse(jm)
     ast.parse(js)
     ast.parse(jl)
+    ast.parse(jb)
     assert "단일셀" in jm
     assert "LAMINAR  = True" in js
     assert "symmetry" in js          # 대칭면 타입 변경
     assert "cell_results.csv" in js
     # A안 프로브 — 문헌 확인된 메싱 TUI seed 분리
     assert "sep-face-zone-by-seed" in jl
+    assert "mark-faces-in-region" in jl   # v2: entity 문법 우회 mark 경로
     assert "cell_labeledA" in jl     # 원본 메시를 덮지 않음
     assert "LABEL 완료" in jl
+    # B안 — 정식 명령명은 "by" 없는 sep_face_zone_angle (문헌: 6.3~26R1)
+    assert "sep_face_zone_angle" in jb
+    assert "BSEP 완료" in jb
 
 
 @needs_cad
@@ -1259,7 +1265,8 @@ def test_cell_journal_step_fns_defined_before_use():
     seeds = cell.build(p)[1]["face_seeds"]
     for j in (exporters.cell_journal(p, area_m2=0.0019),
               exporters.cell_mesh_journal(p, n_bodies=11, face_seeds=seeds),
-              exporters.cell_label_journal(p, face_seeds=seeds)):
+              exporters.cell_label_journal(p, face_seeds=seeds),
+              exporters.cell_bsep_journal(p)):
         lines = j.splitlines()
         defined = set()
         for i, l in enumerate(lines):

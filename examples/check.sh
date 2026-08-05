@@ -6,6 +6,12 @@ echo "=== 단계 ==="
 grep -E "^<<<" "$LOG" | tail -20
 echo "=== 결과 ==="
 grep -E "cells were created|Total Number of Cell Zones|Orthogonal Quality" "$LOG"
+if grep -qE "LABEL 완료|BSEP 완료" "$LOG" 2>/dev/null; then
+  echo "=== 프로브 (분리 시도 상세) ==="
+  # cmd: 마커 다음에 오는 ERROR 까지 같이 보여줌 — 시도별 오류 귀속
+  grep -nE "^    대상:|^      cmd:|^      존 수|^    \[OK\]|^    \[--\]|^    \[!!\]|일치 존|기대 면적|이미 있음|하위:|후보|^  == |오브젝트|object|ERROR|Error object" "$LOG" \
+    | grep -vE "^\s*[0-9]+:\.\.\." | head -120
+fi
 if grep -q "SETUP 완료" "$LOG" 2>/dev/null; then
   echo "=== SETUP (M3) ==="
   sed -n '/5. 포러스 계수/,/<<</p' "$LOG" | grep -E "porosity|Viscous|Inertial|Porosity|Laminar|Relative"
