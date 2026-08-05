@@ -36,6 +36,7 @@ fi
 echo "=== 존 목록 / 분리 ==="
 grep -E "^      (fluid_|solid_|wall|interior)|^    (velocity_inlet|pressure_outlet|symmetry|periodic|interior|분리 대상|분리 후)" "$LOG" | head -30
 echo "=== 좌표 매칭 ==="
+grep -E "^    (face_seeds|입구면 기대|후보 wall|surface_integrals|시험:|x 좌표 획득|좌표를 못)|^      .* x .* area |^    cell_(inlet|outlet) " "$LOG" | head -40
 sed -n '/face_seeds 좌표 매칭/,/face_seeds 목록/p' "$LOG" | grep -E "거리|임계값"
 echo "=== 오류 ==="
 # '...' 로 시작하는 줄은 Fluent 이 저널 코드를 되비춘 것이지 실제 오류가 아님

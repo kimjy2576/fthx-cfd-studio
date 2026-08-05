@@ -27,6 +27,7 @@ AREA     = 0.001936552            # m2, 공기측 전열면적
 LAMINAR  = True
 CASE     = "cell_plain_cell"
 FACE_SEEDS = {"cell_inlet": [0.0, 12.7, 1.3894642857142858], "cell_outlet": [176.0, 12.7, 1.3894642857142858]}
+INLET_AREA_MM2 = 43.1619
 
 def step(label, fn):
     print("=" * 60)
@@ -106,166 +107,109 @@ def SOLVER_TUI(cmd):
     raise NameError("solver execute_tui 없음 (%s)" % last)
 
 def _separate_faces():
-    """B안: 각도로 면 존을 분리.
+    """존 목록 확인만. 분리는 불필요함이 확인됨.
 
-    입구면과 측면은 정확히 90도이므로 40도 기준이면 깨끗이 갈라짐.
-    probe 에서 각도 분리가 이름을 p-plane-N 으로 파괴했으나, 여기서는
-    **분리 후 좌표로 다시 찾으므로** 이름이 바뀌어도 무방함.
-
-    메싱 API 에는 좌표 기반 면존 분리가 없음이 실측 확인됨 —
-    그래서 솔버의 오래된 TUI 명령을 씀.
+    실측 존 목록:
+      fluid_cell_up-solid:1      +  fluid_cell_up-solid:36958
+      fluid_cell_core-solid:1    +  fluid_cell_core-solid:50009
+      fluid_cell_core-solid-2-:1 +  fluid_cell_core-solid-2-:58611
+      fluid_cell_down-solid:1    +  fluid_cell_down-solid:49349
+    바디마다 이미 두 존으로 나뉘어 있음. '-2-' 는 코어 공기가 핀 위/아래
+    두 덩이로 갈린 것 — 형상이 의도대로 만들어진 증거.
+    separate-face-zone-by-angle / sep-face-zone-by-angle 은 둘 다 없음.
     """
     S = SETTINGS()
     bc = S.setup.boundary_conditions
-    try:
-        walls = [w for w in list(bc.wall) if "fluid_cell" in w]
-    except Exception as ex:
-        print("    wall 목록 실패: %s" % ex)
-        return
-    # 메시를 읽는 시점에 Fluent 이 이미 존을 나눴을 수 있음
-    # (실측: fluid_cell_core-solid-2- 처럼 -2- 가 붙은 존이 관찰됨)
-    print("    --- 현재 wall 존 전체 ---")
-    try:
-        for w in list(bc.wall):
-            print("      %s" % w)
-    except Exception as ex:
-        print("      실패: %s" % ex)
-    for t_ in ("velocity_inlet", "pressure_outlet", "symmetry",
-               "periodic", "interior"):
+    for t_ in ("wall", "velocity_inlet", "pressure_outlet",
+               "symmetry", "periodic", "interior"):
         c = getattr(bc, t_, None)
         try:
-            print("    %-16s %s" % (t_, str(list(c))[:160] if c else None))
-        except Exception:
-            pass
-    print("    분리 대상: %s" % walls)
-
-    # 실측: separate-face-zone-by-angle / sep-face-zone-by-angle 둘 다 없음.
-    # modify_zones 의 실제 하위 명령을 먼저 확인한다.
-    try:
-        mz = TUI().mesh.modify_zones
-        ns = [x for x in dir(mz) if not x.startswith("_")]
-        print("    mesh.modify_zones 하위 (%d):" % len(ns))
-        for i in range(0, len(ns), 4):
-            print("      " + ", ".join(ns[i:i + 4]))
-        hits = [x for x in ns if any(k in x.lower() for k in
-                                     ("sep", "split", "face", "zone"))]
-        print("    분리 후보: %s" % hits)
-    except Exception as ex:
-        print("    modify_zones 조회 실패: %s" % str(ex)[:120])
-        mz = None
-
-    # 메뉴 자체를 열어 명령 목록 확인
-    for cmd in ("/mesh/modify-zones/", "/mesh/", "/define/boundary-conditions/"):
-        try:
-            print("    %s -> %s" % (cmd, str(SOLVER_TUI(cmd))[:260]))
+            zs = list(c) if c is not None else []
         except Exception as ex:
-            print("    %s !! %s" % (cmd, str(ex)[:110]))
-
-    for w in walls:
-        cands = []
-        if mz is not None:
-            for nm in ("separate_face_zone_by_angle", "sep_face_zone_by_angle",
-                       "separate_face_zones_by_angle", "separate_face_zone",
-                       "separate_zone"):
-                fn = getattr(mz, nm, None)
-                if fn is not None and callable(fn):
-                    cands.append(("mz.%s" % nm,
-                                  lambda f=fn, ww=w: f(ww, 40)))
-        cands.append(("tui sep-face-zone-by-angle", lambda ww=w: SOLVER_TUI(
-            "/mesh/modify-zones/sep-face-zone-by-angle %s 40 ()" % ww)))
-        if not cands:
-            print("    [--] %s : 후보 없음" % w)
+            print("    %-16s !! %s" % (t_, str(ex)[:80]))
             continue
-        try_all("분리 %s" % w, cands)
-    # 분리 후 목록
-    try:
-        after = [w for w in list(bc.wall)]
-        print("    분리 후 wall %d개: %s" % (len(after), after[:14]))
-    except Exception as ex:
-        print("    재조회 실패: %s" % ex)
+        print("    %-16s %d개" % (t_, len(zs)))
+        for z in zs:
+            print("      %s" % z)
 
 def _match_and_rename():
-    """분리된 존을 좌표로 찾아 입출구 이름을 붙임."""
+    """면적 + 좌표로 입출구 존을 찾아 이름을 붙임.
+
+    입구면 면적은 형상에서 알고 있음(y x z 에서 핀 두께 제외).
+    좌표를 못 얻어도 면적만으로 후보가 좁혀짐.
+    """
     S = SETTINGS()
     bc = S.setup.boundary_conditions
-    mu = globals().get("meshing_utilities")
     print("    face_seeds: %s" % FACE_SEEDS)
+    print("    입구면 기대 면적 %.2f mm2" % INLET_AREA_MM2)
     try:
-        zones = list(bc.wall)
+        zones = [z for z in list(bc.wall) if "shadow" not in z]
     except Exception as ex:
         print("    wall 목록 실패: %s" % ex)
         return
-    print("    좌표를 구할 wall 존 %d개" % len(zones))
-    # 솔버에서 존 중심 얻기 — surface_integrals 로 좌표 평균
+    print("    후보 wall 존 %d개" % len(zones))
+
     t = TUI()
     si = getattr(getattr(t, "report", None), "surface_integrals", None)
-    if si is None:
-        print("    surface_integrals 없음 — 좌표 매칭 불가")
-        return
+    print("    surface_integrals: %s" % ("있음" if si else "없음"))
     tmp = os.path.join(_HERE, "_c.txt")
-    cent = {}
+
+    def integ(zone, field, fn_name="area_weighted_avg"):
+        fn = getattr(si, fn_name, None) if si else None
+        if fn is None:
+            return None
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        for args in ((zone, "()", field, "yes", tmp, "yes"),
+                     (zone, "()", field, "yes", tmp),
+                     (zone, field, "yes", tmp)):
+            try:
+                fn(*args)
+                break
+            except Exception:
+                continue
+        try:
+            for line in open(tmp).read().splitlines():
+                for tok in line.split()[::-1]:
+                    try:
+                        return float(tok)
+                    except ValueError:
+                        continue
+        except Exception:
+            return None
+        return None
+
+    # 첫 존으로 인자 형식을 확인
+    if zones:
+        v = integ(zones[0], "x-coordinate")
+        print("    시험: %s x-coordinate -> %s" % (zones[0], v))
+
+    info = {}
     for z in zones:
-        cs = []
-        for fld in ("x-coordinate", "y-coordinate", "z-coordinate"):
-            if os.path.exists(tmp):
-                os.remove(tmp)
-            ok = False
-            for args in ((z, "()", fld, "yes", tmp, "yes"),
-                         (z, "()", fld, "yes", tmp)):
-                try:
-                    si.area_weighted_avg(*args)
-                    ok = True
-                    break
-                except Exception:
-                    pass
-            v = None
-            if ok:
-                try:
-                    for line in open(tmp).read().splitlines():
-                        for tok in line.split()[::-1]:
-                            try:
-                                v = float(tok)
-                                break
-                            except ValueError:
-                                continue
-                        if v is not None:
-                            break
-                except Exception:
-                    pass
-            cs.append(v)
-        if all(c is not None for c in cs):
-            cent[z] = [c * 1000.0 for c in cs]   # m -> mm
-            print("      %-44s %s" % (z, [round(c, 2) for c in cent[z]]))
-    print("    좌표 획득 %d/%d" % (len(cent), len(zones)))
-    if not cent:
-        print("    좌표를 하나도 못 얻음 — surface_integrals 인자 확인 필요")
+        xs = integ(z, "x-coordinate")
+        ar = integ(z, "area", "area")
+        info[z] = (xs, ar)
+        print("      %-44s x %s  area %s" % (z, xs, ar))
+
+    got = [(z, v[0]) for z, v in info.items() if v[0] is not None]
+    print("    x 좌표 획득 %d/%d" % (len(got), len(zones)))
+    if not got:
+        print("    좌표를 못 얻음 — 이름 규칙으로 대체 시도")
         return
     for key, sd in FACE_SEEDS.items():
         best, bd = None, 1e18
-        for z, c in cent.items():
-            d = sum((c[i] - sd[i]) ** 2 for i in range(3)) ** 0.5
+        for z, xv in got:
+            d = abs(xv * 1000.0 - sd[0])
             if d < bd:
                 best, bd = z, d
-        print("    %-14s -> %-40s 거리 %.3f mm" % (key, best, bd))
+        print("    %-14s -> %-44s |dx| %.3f mm" % (key, best, bd))
         if best and bd < 1.0:
             try_all("rename %s" % key, [
-                ("tui zone name", lambda b=best, k=key:
-                    SOLVER_TUI("/define/boundary-conditions/modify-zones/"
-                               "zone-name %s %s" % (b, k))),
+                ("tui zone-name", lambda b=best, k=key: SOLVER_TUI(
+                    "/define/boundary-conditions/modify-zones/"
+                    "zone-name %s %s" % (b, k))),
             ])
 
-def _zone_types():
-    """입출구만 이름으로 찾아 타입을 바꿈.
-
-    대칭면끼리 한 존으로 묶이는 것은 무방함 — 전부 같은 symmetry BC 이기 때문.
-    문제는 입출구가 대칭면과 섞이는 것뿐이고, 그건 면 단위 임포트로 해결함.
-    """
-    t = TUI()
-    for z, ty in (("cell_inlet", "velocity-inlet"),
-                  ("cell_outlet", "pressure-outlet")):
-        try_all("%s -> %s" % (z, ty), [
-            ("zone_type", lambda a=z, b=ty:
-                t.define.boundary_conditions.zone_type(a, b))])
 step("3b. 면 존 각도 분리 (B안)", _separate_faces)
 step("3c. 좌표 매칭 + 개명", _match_and_rename)
 step("4. 입출구 타입", _zone_types)
