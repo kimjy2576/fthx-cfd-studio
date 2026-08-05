@@ -1193,17 +1193,20 @@ def test_cell_air_spans_full_pitch():
         assert f"({p.operating.air.V_face} 0 0)" in u
 
 
-def test_cell_mesh_journal_separation_order():
-    """분리 → 매칭 → 개명 순서. 분리 방식은 탐색 중이라 이름을 고정하지 않음.
-       (좌표 기반 separate 함수가 meshing_utilities 에 없음이 실측 확인됨)"""
+def test_cell_separation_moved_to_solver():
+    """메싱 API 에 좌표 기반 면존 분리가 없어 솔버로 이관함(B안).
+       메싱 저널은 메시 생성에만, 분리·개명은 솔버 저널에서."""
     from fthx import presets, exporters, cell
     p = presets.cell()
-    j = exporters.cell_mesh_journal(p, n_bodies=7,
-                                    face_seeds=cell.build(p)[1]["face_seeds"])
-    assert "execute_tui" in j
-    assert "mark_faces_in_region" in j
-    assert j.index("12b.") < j.index("13. face_seeds 좌표 매칭")
-    assert j.index("13. face_seeds 좌표 매칭") < j.index("14. 존 이름 부여")
+    jm = exporters.cell_mesh_journal(p, n_bodies=7,
+                                     face_seeds=cell.build(p)[1]["face_seeds"])
+    js = exporters.cell_journal(p, area_m2=0.0019)
+    assert "12b." not in jm                      # 메싱에서는 분리하지 않음
+    assert "separate-face-zone-by-angle" in js   # 솔버에서 분리
+    assert "SOLVER_TUI" in js
+    # 분리 → 매칭·개명 → 타입 변경 순서
+    assert js.index("3b. 면 존 각도 분리") < js.index("3c. 좌표 매칭")
+    assert js.index("3c. 좌표 매칭") < js.index("4. 입출구 타입")
 
 
 def test_journal_defines_helpers_before_use():
