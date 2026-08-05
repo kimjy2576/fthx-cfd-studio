@@ -29,11 +29,11 @@
 
 ---
 
-> **새로 합류했다면** [`docs/HANDOFF_v2.md`](docs/HANDOFF_v2.md) 부터 읽을 것
-> (Fluent 경로 M0~M5 완료 · 주기 단위셀 착수 지점).
-> OpenFOAM 경로는 [`docs/HANDOFF.md`](docs/HANDOFF.md) —
-> 프로젝트 전제, 현재 상태, Fluent 경로에서 배운 함정, OpenFOAM 착수 지점이
-> 정리되어 있음.
+> **새로 합류했다면** [`docs/HANDOFF_v3.md`](docs/HANDOFF_v3.md) 하나만 읽으면 됨
+> — 프로젝트 전제, 현재 상태, 확정 API, **존재하지 않음이 확인된 API**,
+> 반복해서 시간을 버린 패턴, 남은 로드맵이 모두 정리되어 있음.
+> (이전: [v1](docs/HANDOFF.md) OpenFOAM · [v2](docs/HANDOFF_v2.md) M0~M5)
+
 
 ## Fluent 서버에서 바로 실행 (Linux · 파이썬 불필요)
 
