@@ -439,8 +439,7 @@ def _sep_api():
             print("    %s: 없음" % nm)
             continue
         d = (g2.__doc__ or "").strip()
-        print("    %s
-      %s" % (nm, d[:400].replace(chr(10), " | ")))
+        print("    %s : %s" % (nm, d[:400].replace(chr(10), " | ")))
 
     # 3) 입구 영역으로 마킹 시도 — 입구면 주변 얇은 상자
     sd = FACE_SEEDS.get("cell_inlet")
