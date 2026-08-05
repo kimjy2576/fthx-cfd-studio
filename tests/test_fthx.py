@@ -1193,17 +1193,16 @@ def test_cell_air_spans_full_pitch():
         assert f"({p.operating.air.V_face} 0 0)" in u
 
 
-def test_cell_mesh_journal_uses_seed_separation():
-    """각도 분리는 존 이름을 파괴하므로(probe 실측) seed 기반이어야 함"""
+def test_cell_mesh_journal_separation_order():
+    """분리 → 매칭 → 개명 순서. 분리 방식은 탐색 중이라 이름을 고정하지 않음.
+       (좌표 기반 separate 함수가 meshing_utilities 에 없음이 실측 확인됨)"""
     from fthx import presets, exporters, cell
     p = presets.cell()
-    j = exporters.cell_mesh_journal(p, n_bodies=6,
+    j = exporters.cell_mesh_journal(p, n_bodies=7,
                                     face_seeds=cell.build(p)[1]["face_seeds"])
-    assert "execute_tui" in j                    # run_menu 는 없음(실측)
-    assert "separate_face_zones_by_seed" in j
-    assert "sep-face-zone-by-angle" not in j     # 이름 파괴 — 쓰지 않음
-    # 분리 → 매칭 → 개명 순서
-    assert j.index("12b. seed 기반 존 분리") < j.index("13. face_seeds 좌표 매칭")
+    assert "execute_tui" in j
+    assert "mark_faces_in_region" in j
+    assert j.index("12b.") < j.index("13. face_seeds 좌표 매칭")
     assert j.index("13. face_seeds 좌표 매칭") < j.index("14. 존 이름 부여")
 
 
