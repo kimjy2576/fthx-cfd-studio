@@ -405,11 +405,13 @@ step("11b. 메시 선저장", lambda: TUI().file.write_mesh(MESH_OUT))
 step("12. 면 존 표 (id/이름/좌표/면적)", _dump_zones)
 
 def _sep_api():
-    """존 분리. 실제로 존재하는 함수만 골라 쓴다.
+    """A안: mark_faces_in_region 으로 입출구 면을 마킹해 떼어냄.
 
-    실측: separate_face_zones_by_seed 는 None 이었음
-          (getattr 이 없는 이름에 None 을 돌려줌 — dir 목록을 잘못 읽었음)
-          execute_tui by-seed 도 False (경로·인자 불일치)
+    실측으로 확인된 호출 가능 함수:
+      mark_faces_in_region, count_marked_faces,
+      get_zones_with_marked_faces_for_given_face_zones,
+      delete_marked_faces_in_zones, refine_marked_faces_in_zones
+    좌표 기반 *분리* 함수는 없으나, 마킹 후 떼어내는 경로가 있을 수 있음.
     """
     mu = _MU()
     if mu is None:
@@ -417,51 +419,57 @@ def _sep_api():
         return
     globals()["MU"] = mu
 
-    print("    --- 실제 존재하는 분리/마킹 함수 ---")
-    real = []
-    for x in dir(mu):
-        if x.startswith("_"):
-            continue
-        if not any(k in x.lower() for k in
-                   ("separate", "split", "mark", "region", "seed")):
-            continue
-        v = getattr(mu, x, None)
-        ok = v is not None and callable(v)
-        real.append((x, ok))
-    for x, ok in real:
-        print("      %-46s %s" % (x, "호출가능" if ok else "None/비호출"))
-    usable = [x for x, ok in real if ok]
-
-    # 시그니처를 doc 에서 뽑음
-    for x in usable:
-        fn = getattr(mu, x)
-        d = (fn.__doc__ or "").strip().splitlines()
-        head = " ".join(d[:6])[:300] if d else "(doc 없음)"
-        print("      >> %-40s %s" % (x, head))
-
-    print("    --- TUI separate 하위 (호출 가능 여부) ---")
-    try:
-        sep = TUI().boundary.separate
-        for x in dir(sep):
-            if x.startswith("_"):
-                continue
-            v = getattr(sep, x, None)
-            print("      %-40s %s" % (x, type(v).__name__))
-    except Exception as ex:
-        print("      실패: %s" % str(ex)[:120])
-
-    print("    --- execute_tui 로 메뉴 탐색 ---")
-    for cmd in ("/boundary/separate/",
-                "/boundary/manage/",
-                "/objects/"):
+    # 1) mark_faces_in_region 시그니처
+    fn = have(mu, "mark_faces_in_region")
+    print("    mark_faces_in_region: %s" % ("있음" if fn else "없음"))
+    if fn is not None:
+        d = (fn.__doc__ or "").strip()
+        print("      doc: %s" % d[:500].replace(chr(10), " | "))
         try:
-            print("      %s -> %s" % (cmd, str(TUI_EXEC(cmd))[:200]))
+            fn()
         except Exception as ex:
-            print("      %s !! %s" % (cmd, str(ex)[:100]))
+            print("      무인자 -> %s: %s" % (type(ex).__name__, str(ex)[:280]))
 
+    # 2) 관련 함수들의 doc 도 함께
+    for nm in ("count_marked_faces",
+               "get_zones_with_marked_faces_for_given_face_zones",
+               "separate_face_zones_by_cell_neighbor"):
+        g2 = have(mu, nm)
+        if g2 is None:
+            print("    %s: 없음" % nm)
+            continue
+        d = (g2.__doc__ or "").strip()
+        print("    %s
+      %s" % (nm, d[:400].replace(chr(10), " | ")))
+
+    # 3) 입구 영역으로 마킹 시도 — 입구면 주변 얇은 상자
+    sd = FACE_SEEDS.get("cell_inlet")
     rows = globals().get("_ROWS") or []
-    print("    존 %d개 (분리 대상 판단용)" % len(rows))
-step("12b. seed 기반 존 분리", _sep_api)
+    tgt = [r for r in rows if r.get("name")
+           and "fluid_cell_up" in str(r["name"])]
+    if fn is not None and sd and tgt:
+        zn = tgt[0]["name"]
+        eps = 0.5
+        lo = [sd[0] - eps, -1e3, -1e3]
+        hi = [sd[0] + eps, 1e3, 1e3]
+        try_all("입구 영역 마킹 (%s)" % zn, [
+            ("name_list + min/max", lambda: fn(
+                face_zone_name_list=[zn], minimum_point=lo, maximum_point=hi)),
+            ("name_list + region", lambda: fn(
+                face_zone_name_list=[zn], region=[lo, hi])),
+            ("patterns + min/max", lambda: fn(
+                face_zone_patterns=[zn], minimum_point=lo, maximum_point=hi)),
+        ])
+        cnt = have(mu, "count_marked_faces")
+        if cnt is not None:
+            try_all("마킹된 면 수", [
+                ("name_list", lambda: cnt(face_zone_name_list=[zn])),
+                ("patterns", lambda: cnt(face_zone_patterns=[zn])),
+            ])
+    else:
+        print("    마킹 시도 생략 (fn=%s seed=%s 대상=%d)"
+              % (bool(fn), bool(sd), len(tgt)))
+step("12b. 영역 마킹 기반 분리 (A안)", _sep_api)
 
 # 각도 분리 단계는 제거함.
 # 케이싱 솔리드가 있으면 상·하류 박스의 자유면이 입구/출구만 남아
