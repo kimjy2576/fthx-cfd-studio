@@ -26,6 +26,7 @@ T_WALL   = 280.15     # K, 관벽·핀뿌리 등온
 AREA     = 0.001936552            # m2, 공기측 전열면적
 LAMINAR  = True
 CASE     = "cell_plain_cell"
+FACE_SEEDS = {"cell_inlet": [0.0, 12.7, 1.3894642857142858], "cell_outlet": [176.0, 12.7, 1.3894642857142858]}
 
 def step(label, fn):
     print("=" * 60)
@@ -122,18 +123,45 @@ def _separate_faces():
         print("    wall 목록 실패: %s" % ex)
         return
     print("    분리 대상: %s" % walls)
+
+    # 실측: separate-face-zone-by-angle 은 존재하지 않음(invalid command).
+    # modify_zones 의 실제 하위 명령을 먼저 확인한다.
+    try:
+        mz = TUI().mesh.modify_zones
+        ns = [x for x in dir(mz) if not x.startswith("_")]
+        print("    mesh.modify_zones 하위 (%d):" % len(ns))
+        for i in range(0, len(ns), 4):
+            print("      " + ", ".join(ns[i:i + 4]))
+        hits = [x for x in ns if any(k in x.lower() for k in
+                                     ("sep", "split", "face", "zone"))]
+        print("    분리 후보: %s" % hits)
+    except Exception as ex:
+        print("    modify_zones 조회 실패: %s" % str(ex)[:120])
+        mz = None
+
+    # 메뉴 자체를 열어 명령 목록 확인
+    for cmd in ("/mesh/modify-zones/", "/mesh/", "/define/boundary-conditions/"):
+        try:
+            print("    %s -> %s" % (cmd, str(SOLVER_TUI(cmd))[:260]))
+        except Exception as ex:
+            print("    %s !! %s" % (cmd, str(ex)[:110]))
+
     for w in walls:
-        try_all("분리 %s" % w, [
-            ("mesh/modify-zones/separate-face-zone-by-angle",
-             lambda ww=w: SOLVER_TUI(
-                 "/mesh/modify-zones/separate-face-zone-by-angle %s 40 ()" % ww)),
-            ("separate-face-zone-by-angle (인자2)",
-             lambda ww=w: SOLVER_TUI(
-                 "/mesh/modify-zones/separate-face-zone-by-angle %s 40" % ww)),
-            ("tui 객체 경로",
-             lambda ww=w: TUI().mesh.modify_zones
-                 .separate_face_zone_by_angle(ww, 40)),
-        ])
+        cands = []
+        if mz is not None:
+            for nm in ("separate_face_zone_by_angle", "sep_face_zone_by_angle",
+                       "separate_face_zones_by_angle", "separate_face_zone",
+                       "separate_zone"):
+                fn = getattr(mz, nm, None)
+                if fn is not None and callable(fn):
+                    cands.append(("mz.%s" % nm,
+                                  lambda f=fn, ww=w: f(ww, 40)))
+        cands.append(("tui sep-face-zone-by-angle", lambda ww=w: SOLVER_TUI(
+            "/mesh/modify-zones/sep-face-zone-by-angle %s 40 ()" % ww)))
+        if not cands:
+            print("    [--] %s : 후보 없음" % w)
+            continue
+        try_all("분리 %s" % w, cands)
     # 분리 후 목록
     try:
         after = [w for w in list(bc.wall)]
