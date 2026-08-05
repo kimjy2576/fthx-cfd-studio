@@ -39,10 +39,15 @@ jm = exporters.cell_mesh_journal(p, step_name="cell.step",
 js = exporters.cell_journal(p, mesh_in="cell.msh.h5",
                             case_out="cell.cas.h5",
                             area_m2=area, face_seeds=seeds)
+jl = exporters.cell_label_journal(p, mesh_in="cell.msh.h5",
+                                  mesh_out="cell_labeledA.msh.h5",
+                                  face_seeds=seeds)
 ast.parse(jm)      # f-string 이스케이프 실수는 여기서 잡힘 (하지 말 것 #8)
 ast.parse(js)
+ast.parse(jl)
 (OUT / "mesh.py").write_text(jm, encoding="utf-8")
 (OUT / "setup.py").write_text(js, encoding="utf-8")
+(OUT / "label.py").write_text(jl, encoding="utf-8")
 
 g = meta["geometry"]
 print("[생성] examples/cell")
