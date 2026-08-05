@@ -33,6 +33,8 @@ if grep -q "SETUP 완료" "$LOG" 2>/dev/null; then
   grep -E "^    \[스키마\]|^      [a-z_]+ +|^    child_names|^    포러스 대상|^    velocity_inlet|^    pressure_outlet|^    mass_flow_inlet" "$LOG" | head -60
   grep -E "^    \[OK\].*cas\.h5|^    \[!!\]" "$LOG"
 fi
+echo "=== 존 목록 / 분리 ==="
+grep -E "^      (fluid_|solid_|wall|interior)|^    (velocity_inlet|pressure_outlet|symmetry|periodic|interior|분리 대상|분리 후)" "$LOG" | head -30
 echo "=== 좌표 매칭 ==="
 sed -n '/face_seeds 좌표 매칭/,/face_seeds 목록/p' "$LOG" | grep -E "거리|임계값"
 echo "=== 오류 ==="

@@ -122,9 +122,24 @@ def _separate_faces():
     except Exception as ex:
         print("    wall 목록 실패: %s" % ex)
         return
+    # 메시를 읽는 시점에 Fluent 이 이미 존을 나눴을 수 있음
+    # (실측: fluid_cell_core-solid-2- 처럼 -2- 가 붙은 존이 관찰됨)
+    print("    --- 현재 wall 존 전체 ---")
+    try:
+        for w in list(bc.wall):
+            print("      %s" % w)
+    except Exception as ex:
+        print("      실패: %s" % ex)
+    for t_ in ("velocity_inlet", "pressure_outlet", "symmetry",
+               "periodic", "interior"):
+        c = getattr(bc, t_, None)
+        try:
+            print("    %-16s %s" % (t_, str(list(c))[:160] if c else None))
+        except Exception:
+            pass
     print("    분리 대상: %s" % walls)
 
-    # 실측: separate-face-zone-by-angle 은 존재하지 않음(invalid command).
+    # 실측: separate-face-zone-by-angle / sep-face-zone-by-angle 둘 다 없음.
     # modify_zones 의 실제 하위 명령을 먼저 확인한다.
     try:
         mz = TUI().mesh.modify_zones
@@ -180,6 +195,7 @@ def _match_and_rename():
     except Exception as ex:
         print("    wall 목록 실패: %s" % ex)
         return
+    print("    좌표를 구할 wall 존 %d개" % len(zones))
     # 솔버에서 존 중심 얻기 — surface_integrals 로 좌표 평균
     t = TUI()
     si = getattr(getattr(t, "report", None), "surface_integrals", None)
@@ -220,6 +236,10 @@ def _match_and_rename():
         if all(c is not None for c in cs):
             cent[z] = [c * 1000.0 for c in cs]   # m -> mm
             print("      %-44s %s" % (z, [round(c, 2) for c in cent[z]]))
+    print("    좌표 획득 %d/%d" % (len(cent), len(zones)))
+    if not cent:
+        print("    좌표를 하나도 못 얻음 — surface_integrals 인자 확인 필요")
+        return
     for key, sd in FACE_SEEDS.items():
         best, bd = None, 1e18
         for z, c in cent.items():
