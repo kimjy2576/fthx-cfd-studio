@@ -235,11 +235,16 @@ def _sym_walls():
     z=0/Fp 는 핀 사이 중앙 거울면 — 기하적으로 정확한 대칭이므로
     짝 맞춤이 필요한 periodic 대신 symmetry 를 씀.
     conjugate 벽(shadow 짝 있음 — 핀 전연·케이싱 계면)은 제외."""
+    import re
     t = TUI()
     plain, shadows = _walls()
     for w in plain:
-        if "-solid-" in w or "fluid_cell" not in w:
-            continue                      # 고체 자유면은 단열 wall 로 둠
+        # 계면 이름은 A-solid-B-solid 꼴 — "-solid-" 뒤에 다음 바디의
+        # fluid_/solid_ 접두가 옴. 단순 "-solid-" 포함 검사는
+        # fluid_cell_core-solid-2-:1 (코어 위쪽 공기 자유면)까지 계면으로
+        # 오인해 벽으로 남김 (실측 2582504 — 대칭 9/10).
+        if re.search(r"-solid-(?:fluid_|solid_)", w) or "fluid_cell" not in w:
+            continue
         if w in ("cell_inlet", "cell_outlet"):
             continue
         if (w + "-shadow") in shadows:
@@ -302,19 +307,24 @@ def _tube_isothermal():
         except Exception as ex:
             raise RuntimeError("%s fixed_values 상태 조회 실패: %s" % (z, ex))
         print("    [스키마] %s" % str(st)[:260])
-        keys = list(st.keys()) if isinstance(st, dict) else []
-        tkey = next((k for k in keys
-                     if k.lower() in ("t", "temperature", "temp")
-                     or "temp" in k.lower()), None)
+        # 실측 2582504 스키마: {'enable': True,
+        #   'variables': {'Temperature': {'option': 'none'}}}
+        # 온도 키는 최상위가 아니라 variables 아래, 대문자 Temperature.
+        var = st.get("variables", {}) if isinstance(st, dict) else {}
+        tkey = next((k for k in var if "temp" in k.lower()), None)
         if tkey is None:
-            raise RuntimeError("%s 온도 키를 못 찾음 — 키: %s" % (z, keys))
-        try_all("%s %s=%.2f K" % (z, tkey, T_WALL), [
-            ("옵션래퍼", lambda oo=o, k=tkey: oo.fixed_values.set_state(
-                {k: {"option": "value", "value": T_WALL}}) or True),
-            ("값 직접", lambda oo=o, k=tkey: oo.fixed_values.set_state(
-                {k: T_WALL}) or True),
-            ("자식 set_state", lambda oo=o, k=tkey:
-                getattr(oo.fixed_values, k).set_state(T_WALL) or True),
+            raise RuntimeError("%s variables 에 온도 키 없음 — %s"
+                               % (z, list(var)))
+        try_all("%s variables.%s=%.2f K" % (z, tkey, T_WALL), [
+            ("option value", lambda oo=o, k=tkey: oo.fixed_values.set_state(
+                {"variables": {k: {"option": "value",
+                                     "value": T_WALL}}}) or True),
+            ("option constant", lambda oo=o, k=tkey: oo.fixed_values.set_state(
+                {"variables": {k: {"option": "constant",
+                                     "value": T_WALL}}}) or True),
+            ("자식 경로", lambda oo=o, k=tkey:
+                oo.fixed_values.variables[k].set_state(
+                    {"option": "value", "value": T_WALL}) or True),
         ])
         chk = str(o.fixed_values.get_state())
         print("    [확인] %s" % chk[:260])

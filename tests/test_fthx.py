@@ -1153,8 +1153,10 @@ def test_cell_pipeline_file_plumbing():
     # 저장은 시끄럽게 — 조용한 실패 차단 장치들
     assert "os.remove(MESH_OUT)" in lab
     assert "os.remove(CASE_OUT)" in setp and "케이스 저장 실패" in setp
-    # 관 등온: 키 추측 금지 — 실제 스키마에서 읽고, 미반영이면 raise
-    assert "온도 키를 못 찾음" in setp and "미반영" in setp
+    # 관 등온: 실측 스키마(variables.Temperature 중첩) 경로 + 미반영 raise
+    assert "variables" in setp and "미반영" in setp
+    # 대칭 필터: -solid-2- 를 계면으로 오인하면 안 됨 (실측 2582504)
+    assert "-solid-(?:fluid_|solid_)" in setp
 
 
 def test_cell_label_journal_uses_verified_recipe():
