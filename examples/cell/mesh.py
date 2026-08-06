@@ -35,7 +35,7 @@ MIN_SIZE    = 0.0850
 MAX_SIZE    = 0.2500
 GROWTH      = 1.2
 CELLS_PER_GAP = 1
-EXPECT_ZONES  = 11
+EXPECT_ZONES  = 7
 
 def step(label, fn):
     """각 단계를 감싸 로그에 남김. 실패해도 다음으로 진행해 진단을 모음."""
@@ -473,7 +473,7 @@ def _verify():
     import time
     print("    저널 폴더: " + _HERE)
     print("    작업 폴더: " + os.getcwd())
-    for f in (MESH_OUT, LABELED):
+    for f in (MESH_OUT,):
         if os.path.exists(f):
             st = os.stat(f)
             print("    [OK] %-24s %8.1f MB  %s" %
@@ -484,7 +484,7 @@ def _verify():
     fresh = [f for f in os.listdir(_HERE) if f.endswith(".msh.h5")]
     print("    폴더 내 메시 파일: " + (", ".join(sorted(fresh)) or "없음"))
 
-step("16. 라벨된 메시 저장", _write_labeled)
+print("16. (건너뜀) 라벨된 메시는 label 단계가 만듦")
 step("17. 저장 파일 확인", _verify)
 
 print("=" * 60)

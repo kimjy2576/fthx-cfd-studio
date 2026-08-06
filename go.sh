@@ -48,8 +48,7 @@ JOURNAL=mesh.py; MODE="3d -meshing"
 case "${STAGE:-mesh}" in
   setup) JOURNAL=setup.py; MODE="3ddp";;
   solve) JOURNAL=setup.py; MODE="3ddp"; export FTHX_ITER="${ITER:-200}";;
-  label) JOURNAL=label.py; MODE="3d -meshing";;   # A안 — 메싱 TUI seed 분리
-  bsep)  JOURNAL=sep_solver.py; MODE="3ddp";;     # B안 — 솔버 sep-face-zone-angle
+  label) JOURNAL=label.py; MODE="3d -meshing";;   # M2 라벨링 (각도분리+개명)
 esac
 OUT=$(fluent $MODE -g -t"$CORES" -i "$JOURNAL" 2>&1)
 echo "$OUT" | sed 's/^/      /'
@@ -71,7 +70,7 @@ while true; do
   # 저널이 끝났는지 로그로 판정 — 솔버는 스스로 종료하지 않을 수 있음
   if [ $((SECONDS-T0)) -gt 20 ]; then
     L=$(ls -t "$DIR"/*.trn 2>/dev/null | head -1)
-    if [ -n "$L" ] && grep -q "SETUP 완료\|CELL 완료\|LABEL 완료\|BSEP 완료\|위 check-mesh 출력의" "$L" 2>/dev/null; then
+    if [ -n "$L" ] && grep -q "SETUP 완료\|CELL 완료\|LABEL 완료\|위 check-mesh 출력의" "$L" 2>/dev/null; then
       echo; echo "      저널 종료 확인 — 작업 정리 ($((SECONDS-T0))초)"
       bkill "$JOB" >/dev/null 2>&1
       sleep 3; break

@@ -38,15 +38,14 @@ def cell_geometry(p: FTHXParams, n_up: float = 2.0, n_down: float = 4.0,
     """단일셀 도메인 치수. n_up/n_down 은 Pl 배수.
 
     periodic=True (기본)
-        y 0~Pt, z 0~Fp 전체 피치.
-        **C안**: 상·하류 끝을 슬래브(slab_mm)로 얇게 쪼개고 그 측면만
-        케이싱 solid 로 감쌈 → 슬래브의 자유면이 입구(출구) 하나만 남음.
-        (실측: 전체 피치라도 측면이 자유면이면 입구와 한 존으로 묶임.
-         분리 API 는 메싱·솔버 모두 없음 — probe 의 케이싱과 같은 원리로
-         CAD 에서 해결. Fluent API 에 의존하지 않음.)
+        y 0~Pt, z 0~Fp 전체 피치. 입구가 측면과 한 존으로 묶여 나오지만
+        메싱 TUI /boundary/separate/sep-face-zone-by-angle **(id) 리스트
+        문법**으로 분리됨 (실측 2580749 — label 단계가 담당).
         측면(y=0/Pt 관 중심, z=0/Fp 핀 사이 중앙)은 기하적으로 거울
         대칭면이므로 solver 에서 symmetry 로 걺 — 짝 맞춤이 필요한
         periodic 보다 단순하고 이 형상에서는 물리적으로 동일함.
+        (한때 C안: 끝단 슬래브+케이싱으로 CAD 에서 분리 — A안 확정으로
+         철회. eb2fcd9 참고)
     periodic=False
         y 0~Pt/2, z 0~Fp/2 대칭 1/4. 셀은 1/4 이지만 입출구 분리 불가.
     """
@@ -68,9 +67,6 @@ def cell_geometry(p: FTHXParams, n_up: float = 2.0, n_down: float = 4.0,
         "Lx": L_up + t.Nr * t.Pl + L_dn,
         "Ly": Ly, "Lz": Lz,
         "periodic": periodic,
-        # C안 — 입출구 분리용 슬래브·케이싱 (periodic 모드만)
-        "slab_mm": 2.0 if periodic else 0.0,
-        "cap_mm": 0.5 if periodic else 0.0,
         "L_up": L_up, "L_down": L_dn,
         "x_core": (x_core0, x_core1),
         "Fp": Fp, "t_f_half": f.t_f / 2.0,
@@ -145,15 +141,8 @@ def build(p: FTHXParams, n_up: float = 2.0, n_down: float = 4.0,
         return body
 
     # ---- 공기 (핀 사이 간극: z = tf2 ~ Lz) ----
-    # C안: 상·하류 끝 슬래브를 별도 바디로 — 측면을 케이싱으로 감싸면
-    # 슬래브의 자유면이 입구(출구) 하나만 남아 존이 저절로 분리됨.
-    s = g.get("slab_mm", 0.0)
-    if s > 0:
-        segs = (("slab_in", 0.0, s), ("up", s, xc0), ("core", xc0, xc1),
-                ("down", xc1, Lx - s), ("slab_out", Lx - s, Lx))
-    else:
-        segs = (("up", 0.0, xc0), ("core", xc0, xc1), ("down", xc1, Lx))
-    for tag, a, b in segs:
+    for tag, a, b in (("up", 0.0, xc0), ("core", xc0, xc1),
+                      ("down", xc1, Lx)):
         # 핀 위/아래 공기를 한 바디로 (핀이 중간에 있으면 자동으로 두 덩이)
         air = box(a, b, 0.0, Ly, 0.0, Lz)
         if tag == "core":
@@ -165,16 +154,6 @@ def build(p: FTHXParams, n_up: float = 2.0, n_down: float = 4.0,
             assy.add(air, name=f"fluid_cell_{tag}",
                      color=cq.Color(0.55, 0.75, 0.95))
 
-    # ---- 케이싱 (슬래브 측면만 감싸는 액자꼴 solid) ----
-    # 측면이 solid 계면이 되면 자유면에서 빠짐 → 슬래브 자유면 = 입구/출구 뿐.
-    # 연장부(발달용) 끝 2mm 만 no-slip 이 되므로 물리 훼손이 없음.
-    if s > 0:
-        tc = g["cap_mm"]
-        for tag, a, b in (("in", 0.0, s), ("out", Lx - s, Lx)):
-            frame = box(a, b, -tc, Ly + tc, -tc, Lz + tc).cut(
-                box(a, b, 0.0, Ly, 0.0, Lz))
-            assy.add(frame, name=f"solid_cap_{tag}",
-                     color=cq.Color(0.6, 0.6, 0.65))
 
     # ---- 핀 (z = 0 ~ tf2, 두께 대칭 반쪽) ----
     fin = box(xc0, xc1, 0.0, Ly, fz0, fz1)
@@ -225,9 +204,8 @@ def build(p: FTHXParams, n_up: float = 2.0, n_down: float = 4.0,
         "operating": p.operating.model_dump(),
         "operating_derived": p.operating_derived(),
         "note": ("핀 실형상 · 포러스 없음. "
-                 + ("전체 피치 + 끝단 슬래브 측면 케이싱(C안) — 슬래브의 "
-                    "자유면이 입구/출구 하나뿐이라 존이 저절로 분리됨. "
-                    "측면은 거울 대칭면이므로 symmetry."
+                 + ("전체 피치 — 입출구는 label 단계(메싱 TUI 각도분리)가 "
+                    "분리·개명. 측면은 거울 대칭면이므로 symmetry."
                     if g.get("periodic") else "네 측면이 모두 대칭면.")),
     }
     return assy, meta

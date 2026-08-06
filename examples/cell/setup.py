@@ -4,8 +4,9 @@
 #   fluent 3ddp -g -t8 -i cell_setup.py
 #
 # 도메인 x 176.0 · y 25.40 (Pt) · z 1.814 (Fp) mm
-# C안: 끝단 슬래브(2.0mm) 측면을 케이싱으로 감쌈 —
-#      슬래브 자유면 = 입구/출구 뿐이라 존이 저절로 분리됨.
+# 파이프라인: mesh -> label -> setup -> solve.
+# 입출구는 label 단계(메싱 TUI 각도분리)가 분리·개명해 둠 —
+# 여기서는 확인만 하고, 없으면 B안(솔버 각도분리)으로 폴백.
 # 측면은 거울 대칭면(y: 관 중심, z: 핀 사이 중앙) → symmetry
 # Re_Dh 489 (laminar) → 난류 모델 끔
 # 셀 추정 1502k · h_xy 0.25 · z 10+2층
@@ -18,7 +19,7 @@ try:
 except NameError:
     _HERE = os.getcwd()
 
-MESH_IN  = os.path.join(_HERE, r"cell.msh.h5")
+MESH_IN  = os.path.join(_HERE, r"cell_labeled.msh.h5")
 CASE_OUT = os.path.join(_HERE, r"cell.cas.h5")
 ITER     = int(os.environ.get("FTHX_ITER", "0"))
 U_MAX    = 2.869315     # m/s, 최소유동면적 기준
@@ -31,8 +32,7 @@ CASE     = "cell_plain_cell"
 FACE_SEEDS = {"cell_inlet": [0.0, 12.7, 1.3894642857142858], "cell_outlet": [176.0, 12.7, 1.3894642857142858]}
 # 입구는 슬래브(핀 없음)의 자유면 — 전체 단면 Ly x Lz
 INLET_AREA_MM2 = 46.0829
-INLET_SRC  = "fluid_cell_slab_in-solid"    # C안: 이 바디의 유일한 자유면 = 입구
-OUTLET_SRC = "fluid_cell_slab_out-solid"
+ANGLE = 40.0     # B안 폴백용 — 인접 법선차 90도
 
 def step(label, fn):
     print("=" * 60)
@@ -140,32 +140,77 @@ def _air_air_interior():
         ])
 step("3c. 공기-공기 계면 -> interior", _air_air_interior)
 
-def _rename_io():
-    """입출구 개명 — C안: 슬래브 바디의 유일한 자유면이 곧 입구(출구).
-
-    좌표·면적 조회가 전혀 필요 없음. 슬래브 측면은 케이싱과의 conjugate
-    벽(shadow 짝 있음), 흐름 방향 면은 공기-공기 계면(위에서 interior)이므로
-    남는 자유면 벽은 정확히 하나임. (형상 회귀 테스트로 고정됨)"""
+def _io_area(zone):
+    """조각 면적 (mm2/m2 불문) — 실측 2580752 에서 작동 확인된 TUI 체인."""
     t = TUI()
-    plain, shadows = _walls()
-    print("    입구면 기대 면적 %.2f mm2 (검산용)" % INLET_AREA_MM2)
-    for src, dst in ((INLET_SRC, "cell_inlet"), (OUTLET_SRC, "cell_outlet")):
-        cand = [w for w in plain
-                if w.startswith(src)                    # 해당 슬래브 바디의 존
-                and "-solid-" not in w[len(src):]       # 계면 제외
-                and (w + "-shadow") not in shadows]     # conjugate 벽 제외
-        print("    %s 후보: %s" % (dst, cand))
-        if len(cand) != 1:
-            print("    [!!] 후보가 %d개 — 개명 보류. 존 조사(3b) 출력 확인 요망"
-                  % len(cand))
+    si = getattr(getattr(t, "report", None), "surface_integrals", None)
+    fn = getattr(si, "area", None) if si else None
+    if fn is None:
+        return None
+    tmp = os.path.join(_HERE, "_a.txt")
+    if os.path.exists(tmp):
+        os.remove(tmp)
+    for args in ((zone, "()", "yes", tmp, "yes"),
+                 (zone, "()", "yes", tmp),
+                 (zone, "yes", tmp)):
+        try:
+            fn(*args)
+            break
+        except Exception:
             continue
-        try_all("%s -> %s" % (cand[0], dst), [
-            ("modify_zones.zone_name", lambda a=cand[0], b=dst:
+    try:
+        for line in open(tmp).read().splitlines():
+            for tok in line.split()[::-1]:
+                try:
+                    return float(tok)
+                except ValueError:
+                    continue
+    except Exception:
+        return None
+    return None
+
+def _io_match(a):
+    if a is None:
+        return False
+    for sc in (1.0, 1e-6):
+        t_ = INLET_AREA_MM2 * sc
+        if abs(a - t_) / t_ < 0.02:
+            return True
+    return False
+
+def _ensure_io():
+    """입출구 확보 — 원칙은 label 단계 산출물 확인만.
+
+    cell_inlet/cell_outlet 이 없으면 B안 폴백: 솔버 각도분리
+    sep_face_zone_angle ("by" 없는 정식명 — 실측 2580752 에서
+    wall 19->23->27 검증) 후 면적으로 조각을 찾아 개명."""
+    t = TUI()
+    plain, _sh = _walls()
+    if "cell_inlet" in plain and "cell_outlet" in plain:
+        print("    라벨 확인: cell_inlet / cell_outlet 있음 (label 단계 산출물)")
+        return
+    print("    [!!] 라벨 없음 — B안 폴백 (라벨 안 된 메시를 읽었을 때)")
+    mz = getattr(getattr(t, "mesh", None), "modify_zones", None)
+    if mz is None:
+        raise RuntimeError("mesh.modify_zones 없음 — label 단계를 먼저 돌릴 것")
+    for src, dst in (("fluid_cell_up-solid:1", "cell_inlet"),
+                     ("fluid_cell_down-solid:1", "cell_outlet")):
+        n0 = len(_walls()[0])
+        mz.sep_face_zone_angle(src, ANGLE)
+        pieces = [w for w in _walls()[0]
+                  if w.startswith(src + ":") or w == src]
+        print("    %s 분리: wall %d -> %d, 조각 %s"
+              % (src, n0, len(_walls()[0]), pieces))
+        hit = [w for w in pieces if _io_match(_io_area(w))]
+        if len(hit) != 1:
+            raise RuntimeError("%s 조각 중 기대 면적 일치 %d개" % (src, len(hit)))
+        try_all("%s -> %s" % (hit[0], dst), [
+            ("mesh.modify_zones.zone_name", lambda a=hit[0], b=dst:
+                mz.zone_name(a, b)),
+            ("bc.modify_zones.zone_name", lambda a=hit[0], b=dst:
                 t.define.boundary_conditions.modify_zones.zone_name(a, b)),
-            ("zone_name", lambda a=cand[0], b=dst:
-                t.define.boundary_conditions.zone_name(a, b)),
         ])
-step("3d. 입출구 개명 (슬래브 자유면)", _rename_io)
+step("3d. 입출구 확보 (라벨 확인 · 없으면 B안 폴백)", _ensure_io)
 
 def _zone_types():
     """메싱에서 이름만 바뀐 존은 솔버에서 전부 wall — 타입을 바꿔야 BC 가 걸림.

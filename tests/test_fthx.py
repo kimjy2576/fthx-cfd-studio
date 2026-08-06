@@ -1061,9 +1061,7 @@ def test_cell_bodies_and_no_overlap(p):
     assy, m = cell.build(p, include_ref=True)
     B = {c.name: c.obj for c in assy.children}
     assert "solid_fin" in B
-    # C안: up/core/down + 끝단 슬래브 2개
-    assert sum(1 for k in B if k.startswith("fluid_cell_")) == 5
-    assert "solid_cap_in" in B and "solid_cap_out" in B
+    assert sum(1 for k in B if k.startswith("fluid_cell_")) == 3
     assert CAD.check_overlap(assy) == []
     g = cell.cell_geometry(p)
     fz0, fz1 = g["fin_z"]
@@ -1127,54 +1125,31 @@ def test_cell_journals_valid():
     jm = exporters.cell_mesh_journal(p, n_bodies=6, face_seeds=seeds)
     js = exporters.cell_journal(p, area_m2=0.00051)
     jl = exporters.cell_label_journal(p, face_seeds=seeds)
-    jb = exporters.cell_bsep_journal(p)
     ast.parse(jm)
     ast.parse(js)
     ast.parse(jl)
-    ast.parse(jb)
     assert "단일셀" in jm
     assert "LAMINAR  = True" in js
     assert "symmetry" in js          # 대칭면 타입 변경
     assert "cell_results.csv" in js
     # A안 프로브 — 문헌 확인된 메싱 TUI seed 분리
-    assert "sep-face-zone-by-seed" in jl
-    assert "mark-faces-in-region" in jl   # v2: entity 문법 우회 mark 경로
-    assert "cell_labeledA" in jl     # 원본 메시를 덮지 않음
+    assert "sep-face-zone-by-angle" in jl   # A안 확정 레시피
     assert "LABEL 완료" in jl
-    # B안 — 정식 명령명은 "by" 없는 sep_face_zone_angle (문헌: 6.3~26R1)
-    assert "sep_face_zone_angle" in jb
-    assert "BSEP 완료" in jb
 
 
-@needs_cad
-def test_cell_slab_free_face_is_inlet_outlet():
-    """C안의 성립 조건: 케이싱이 슬래브 측면을 전부 덮어
-       슬래브의 자유면이 입구(출구) 정확히 하나여야 함.
-       이것이 깨지면 Fluent 이 입구를 측면과 한 존으로 묶음(실측)."""
-    from fthx import presets, cell
+def test_cell_label_journal_uses_verified_recipe():
+    """A안 확정(실측 2580749): 각도분리는 존을 (id) 리스트 문법으로.
+       괄호 없는 id 는 토큰별 "Invalid entity" (v1 전패의 원인).
+       저장 전 기존 파일 삭제 — overwrite 프롬프트에 걸리면 [OK] 를
+       돌려주고도 실제로 저장 안 함 (실측 mtime 불변)."""
+    from fthx import presets, exporters
     p = presets.cell()
-    assy, m = cell.build(p)
-    B = {c.name: c.obj for c in assy.children}
-
-    def free_faces(nm):
-        others = [v for k, v in B.items() if k != nm]
-        out = []
-        for f in B[nm].Faces():
-            c = f.Center()
-            if not any(abs(f.Area() - h.Area()) < 1e-6
-                       and (c - h.Center()).Length < 1e-6
-                       for o in others for h in o.Faces()):
-                out.append((f.Area(), (c.x, c.y, c.z)))
-        return out
-
-    g = cell.cell_geometry(p)
-    for body, key in (("fluid_cell_slab_in", "cell_inlet"),
-                      ("fluid_cell_slab_out", "cell_outlet")):
-        ff = free_faces(body)
-        assert len(ff) == 1, f"{body} 자유면 {len(ff)}개 — 1개여야 함"
-        area, c = ff[0]
-        assert area == pytest.approx(g["Ly"] * g["Lz"], rel=1e-6)
-        assert c[0] == pytest.approx(m["face_seeds"][key][0], abs=1e-9)
+    j = exporters.cell_label_journal(p)
+    assert "sep-face-zone-by-angle (%s)" in j          # 리스트 문법
+    assert "os.remove(MESH_OUT)" in j                  # 프롬프트 회피
+    assert "cell_labeled.msh.h5" in j                  # 표준 산출물
+    assert "저장 검증 실패" in j                        # mtime 재검증
+    assert "LABEL 완료" in j
 
 
 @needs_cad
@@ -1238,18 +1213,19 @@ def test_cell_air_spans_full_pitch():
         assert f"({p.operating.air.V_face} 0 0)" in u
 
 
-def test_cell_labeling_by_slab_free_face():
-    """C안: 분리 API 없이 CAD 로 해결 — 슬래브 바디의 유일한 자유면이
-       곧 입구(출구)라서 이름만으로 확정됨. 좌표·면적 조회 불필요.
-       (B안 각도분리·좌표매칭은 API 부재로 폐기 — HANDOFF_v3 5절)"""
+def test_cell_setup_reads_labeled_and_has_fallback():
+    """파이프라인: mesh -> label -> setup -> solve.
+       setup 은 label 산출물(cell_labeled.msh.h5)을 읽어 라벨 확인만 —
+       없으면 B안 폴백(솔버 sep_face_zone_angle, 실측 2580752 검증).
+       C안(슬래브+케이싱)은 A안 확정으로 철회됨 (eb2fcd9 -> revert)."""
     from fthx import presets, exporters
     p = presets.cell()
     js = exporters.cell_journal(p, area_m2=0.0019)
-    assert "separate-face-zone-by-angle" not in js   # 폐기된 B안 잔재 금지
-    assert "SOLVER_TUI" not in js
-    assert "INLET_SRC" in js and "fluid_cell_slab_in-solid" in js
-    # 순서: 계면 interior → 개명 → 타입 변경 → 측면 대칭
-    assert (js.index("3c. 공기-공기 계면") < js.index("3d. 입출구 개명")
+    assert 'cell_labeled.msh.h5' in js
+    assert "INLET_SRC" not in js                     # C안 잔재 금지
+    assert "sep_face_zone_angle" in js               # B안 폴백 (정식명, "by" 없음)
+    # 순서: 계면 interior → 입출구 확보 → 타입 변경 → 측면 대칭
+    assert (js.index("3c. 공기-공기 계면") < js.index("3d. 입출구 확보")
             < js.index("4. 입출구 타입") < js.index("5. 측면 대칭면"))
     # 공기-공기 계면이 wall 로 남으면 유동이 막힘 (실측 2578722)
     assert "interior" in js
@@ -1265,8 +1241,7 @@ def test_cell_journal_step_fns_defined_before_use():
     seeds = cell.build(p)[1]["face_seeds"]
     for j in (exporters.cell_journal(p, area_m2=0.0019),
               exporters.cell_mesh_journal(p, n_bodies=11, face_seeds=seeds),
-              exporters.cell_label_journal(p, face_seeds=seeds),
-              exporters.cell_bsep_journal(p)):
+              exporters.cell_label_journal(p, face_seeds=seeds)):
         lines = j.splitlines()
         defined = set()
         for i, l in enumerate(lines):

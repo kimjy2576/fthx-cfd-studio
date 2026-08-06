@@ -192,19 +192,34 @@ mu.rename_face_zone(zone_name=old, new_name=new)
 
 ---
 
-## 5. 존재하지 않음이 확인된 API (다시 시도하지 말 것)
+## 5. 존재하지 않음이 확인된 API — 와 **정정** (2026-08-06)
+
+> ⚠ **정정**: 아래 표의 "분리 불가" 계열 결론은 **조사 범위 오류**였음.
+> 실측(작업 2580749·2580752)으로 뒤집힘:
+>
+> | 정정 | 실측 |
+> |---|---|
+> | 메싱 TUI `/boundary/separate/` 에 분리 명령 9종 실재 (`sep-face-zone-by-angle/seed/seed-angle/region/mark/...`) | `meshing_utilities` **서비스**만 전수조사하고 TUI 메뉴를 안 봤던 것 |
+> | 각도분리는 존을 **`(id)` 리스트 문법**으로 줘야 함: `sep-face-zone-by-angle (29) 40 yes` → 존 27→31 성공 | 괄호 없는 `29 40` 은 토큰별 `Invalid entity` 로 조용히 실패 (v1 전패의 원인) |
+> | 솔버 정식명은 `sep-face-zone-angle` (**"by" 없음**) — `tui.mesh.modify_zones.sep_face_zone_angle(name, 40)` 으로 wall 19→23 성공 | 아래 표의 두 실패는 전부 "by" 가 들어간 **오기** |
+> | `file.write_mesh` 는 기존 파일이 있으면 overwrite 프롬프트에 걸려 **[OK] 를 돌려주고도 저장 안 함** — 저장 전 `os.remove` 필수 | 실측: write [OK] 인데 mtime 불변 |
+>
+> 현행: **A안 확정** — label 단계(`STAGE=label`)가 각도분리+면적판정+개명 후
+> `cell_labeled.msh.h5` 저장. setup 은 라벨 확인만 하고, 없으면 B안
+> (솔버 `sep_face_zone_angle`) 폴백. C안(끝단 슬래브+케이싱, eb2fcd9)은
+> 오판 위에 세운 우회로였으므로 철회함.
 
 | 시도한 것 | 결과 |
 |---|---|
 | `run_menu` | 메싱·솔버 **둘 다 없음** |
-| `separate_face_zones_by_seed` | `meshing_utilities` 에 **없음** (getattr 이 None) |
-| 좌표/seed 기반 면존 분리 | `meshing_utilities` 에 **없음**. separate 계열은 셋뿐: `separate_cell_zone_layers_by_face_zone_using_id/name`, `separate_face_zones_by_cell_neighbor` |
-| `separate-face-zone-by-angle` (솔버 TUI) | `invalid command` |
-| `sep-face-zone-by-angle` (솔버 TUI) | `invalid command` |
-| `mesh.modify_zones.separate_face_zone_by_angle` | 속성 없음 |
+| `separate_face_zones_by_seed` | `meshing_utilities` 에 **없음** (getattr 이 None) — 단, TUI 메뉴에는 있음 (위 정정) |
+| 좌표/seed 기반 면존 분리 | `meshing_utilities` 에 **없음**. separate 계열은 셋뿐: `separate_cell_zone_layers_by_face_zone_using_id/name`, `separate_face_zones_by_cell_neighbor` — 단, TUI 메뉴에는 있음 (위 정정) |
+| `separate-face-zone-by-angle` (솔버 TUI) | `invalid command` — **명령명 오기**. 정식은 `sep-face-zone-angle` |
+| `sep-face-zone-by-angle` (솔버 TUI) | `invalid command` — **명령명 오기** (동일) |
+| `mesh.modify_zones.separate_face_zone_by_angle` | 속성 없음 — **속성명 오기**. 정식은 `sep_face_zone_angle` |
 | 임포트 `CreateObjectPer=Face` / `OneZonePer=Face` | 둘 다 실패 — 바디 단위로만 들어옴 |
 | `sources.energy` 설정 | `get_state()` 가 `TypeError: unhashable type`. 슬롯이 라운드마다 `['1']`↔`[]` |
-| 각도 분리 (probe 190바디) | 존 이름을 `p-plane-N` 으로 **파괴**, 메시 47MB→3.6MB, SIGSEGV |
+| 각도 분리 (probe 190바디) | 존 이름을 `p-plane-N` 으로 **파괴**, 메시 47MB→3.6MB, SIGSEGV — **전역 적용**이 문제. 단일 존 대상 `(id)` 는 안전함이 실측됨 |
 
 ---
 
