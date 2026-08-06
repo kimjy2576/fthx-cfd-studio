@@ -2017,36 +2017,72 @@ step("6. 입출구 조건", _bc)
 
 def _tube_isothermal():
     """관을 등온 고체로 — 냉매측을 풀지 않고 공기측 h 만 뽑기 위함.
-       벽 BC 대신 셀 존 fixed_values 를 씀. 관 자유면이 대칭 절단면과
-       묶여 있어 벽 BC 로는 대칭면까지 등온이 되기 때문."""
+       벽 BC 대신 셀 존 fixed_values 를 씀.
+
+       실측 2582491: 't'/'temperature' 키가 KeyError — 키 이름을 추측하지
+       말고 enable 후 get_state 로 **실제 키를 읽어** 그 키에 값을 넣음.
+       설정 후 재조회로 T_WALL 반영을 검증 — 안 되면 raise (조용한 실패
+       금지: 관이 등온이 아니면 결과 전체가 무의미함)."""
     S = SETTINGS()
     fl = S.setup.cell_zone_conditions.solid
     zones = [z for z in list(fl) if "tube" in z]
     print("    관 존: %s" % zones)
     for z in zones:
         o = fl[z]
-        try:
-            print("    [스키마] %s" % str(o.get_state())[:220])
-        except Exception as ex:
-            print("    스키마 실패: %s" % ex)
-        try_all("%s 고정온도 %.2f K" % (z, T_WALL), [
-            ("fixed_values enable+t", lambda oo=o: oo.fixed_values.set_state(
-                {{"enable": True,
-                 "t": {{"option": "value", "value": T_WALL}}}})),
-            ("fixed_values temperature", lambda oo=o: oo.fixed_values.set_state(
-                {{"enable": True,
-                 "temperature": {{"option": "value", "value": T_WALL}}}})),
-            ("enable 만", lambda oo=o: oo.fixed_values.set_state({{"enable": True}})),
+        try_all("%s fixed enable" % z, [
+            ("fixed_values enable", lambda oo=o:
+                oo.fixed_values.set_state({{"enable": True}}) or True),
         ])
         try:
-            print("    [확인] %s" % str(o.fixed_values.get_state())[:220])
+            st = o.fixed_values.get_state()
         except Exception as ex:
-            print("    [확인] 실패: %s" % ex)
+            raise RuntimeError("%s fixed_values 상태 조회 실패: %s" % (z, ex))
+        print("    [스키마] %s" % str(st)[:260])
+        keys = list(st.keys()) if isinstance(st, dict) else []
+        tkey = next((k for k in keys
+                     if k.lower() in ("t", "temperature", "temp")
+                     or "temp" in k.lower()), None)
+        if tkey is None:
+            raise RuntimeError("%s 온도 키를 못 찾음 — 키: %s" % (z, keys))
+        try_all("%s %s=%.2f K" % (z, tkey, T_WALL), [
+            ("옵션래퍼", lambda oo=o, k=tkey: oo.fixed_values.set_state(
+                {{k: {{"option": "value", "value": T_WALL}}}}) or True),
+            ("값 직접", lambda oo=o, k=tkey: oo.fixed_values.set_state(
+                {{k: T_WALL}}) or True),
+            ("자식 set_state", lambda oo=o, k=tkey:
+                getattr(oo.fixed_values, k).set_state(T_WALL) or True),
+        ])
+        chk = str(o.fixed_values.get_state())
+        print("    [확인] %s" % chk[:260])
+        if ("%.2f" % T_WALL) not in chk and ("%.1f" % T_WALL) not in chk \
+                and str(T_WALL) not in chk:
+            raise RuntimeError("%s 온도 %.2f K 미반영 — 상태: %s"
+                               % (z, T_WALL, chk[:200]))
 step("7. 관 등온 (고정온도)", _tube_isothermal)
 
 step("8. 초기화", lambda: try_all("hybrid", [
     ("settings", lambda: SETTINGS().solution.initialization.hybrid_initialize())]))
-step("9. 케이스 저장", lambda: TUI().file.write_case(CASE_OUT))
+def _save_case():
+    """저장을 시끄럽게 — write_mesh 와 같은 부류의 조용한 실패 차단.
+       (실측 2582491: 9단계 [OK] 인데 cell.cas.h5 부재)"""
+    if os.path.exists(CASE_OUT):
+        os.remove(CASE_OUT)
+        print("    기존 %s 삭제 (프롬프트 회피)" % os.path.basename(CASE_OUT))
+    try_all("write-case", [
+        ("tui write_case", lambda: TUI().file.write_case(CASE_OUT) or True),
+        ("tui write_case yes", lambda:
+            TUI().file.write_case(CASE_OUT, "yes") or True),
+        ("settings file.write", lambda: SETTINGS().file.write(
+            file_name=CASE_OUT, file_type="case") or True),
+    ])
+    import time
+    if not os.path.exists(CASE_OUT):
+        raise RuntimeError("케이스 저장 실패 — %s 없음" % CASE_OUT)
+    st = os.stat(CASE_OUT)
+    print("    [OK] %s  %.1f MB  %s" % (
+        os.path.basename(CASE_OUT), st.st_size / 1e6,
+        time.strftime("%H:%M:%S", time.localtime(st.st_mtime))))
+step("9. 케이스 저장 (검증 포함)", _save_case)
 
 if ITER > 0:
     step("10. 반복 %d회" % ITER, lambda: try_all("iterate", [

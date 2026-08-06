@@ -15,7 +15,7 @@ except NameError:
     _HERE = os.getcwd()
 
 MESH_IN  = os.path.join(_HERE, r"cell.msh.h5")
-MESH_OUT = os.path.join(_HERE, r"cell_labeledA.msh.h5")
+MESH_OUT = os.path.join(_HERE, r"cell_labeled.msh.h5")
 INLET_AREA_MM2 = 46.0829     # 입구 = 전체 단면 Ly x Lz (x=0 엔 핀 없음)
 ANGLE    = 40.0                       # 인접 법선차 90도 — 40도면 확실히 갈라짐
 

@@ -1137,6 +1137,26 @@ def test_cell_journals_valid():
     assert "LABEL 완료" in jl
 
 
+def test_cell_pipeline_file_plumbing():
+    """배관 일치 — label 산출물명 == setup 입력명 (커밋된 실물 기준).
+       실측 2582486/2582491: 생성기 기본값만 고치고 gen_cell 의 명시
+       인자를 안 고쳐 label 은 labeledA 로 쓰고 setup 은 labeled 를
+       읽음 → setup 이 미라벨 사본으로 감 (B안 폴백이 구제했음)."""
+    import os, re
+    root = os.path.join(os.path.dirname(__file__), "..", "examples", "cell")
+    lab = open(os.path.join(root, "label.py"), encoding="utf-8").read()
+    setp = open(os.path.join(root, "setup.py"), encoding="utf-8").read()
+    m_out = re.search(r'MESH_OUT = .*r"([^"]+)"', lab)
+    m_in = re.search(r'MESH_IN  = .*r"([^"]+)"', setp)
+    assert m_out and m_in
+    assert m_out.group(1) == m_in.group(1) == "cell_labeled.msh.h5"
+    # 저장은 시끄럽게 — 조용한 실패 차단 장치들
+    assert "os.remove(MESH_OUT)" in lab
+    assert "os.remove(CASE_OUT)" in setp and "케이스 저장 실패" in setp
+    # 관 등온: 키 추측 금지 — 실제 스키마에서 읽고, 미반영이면 raise
+    assert "온도 키를 못 찾음" in setp and "미반영" in setp
+
+
 def test_cell_label_journal_uses_verified_recipe():
     """A안 확정(실측 2580749): 각도분리는 존을 (id) 리스트 문법으로.
        괄호 없는 id 는 토큰별 "Invalid entity" (v1 전패의 원인).
