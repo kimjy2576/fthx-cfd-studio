@@ -769,7 +769,21 @@ except NameError:
 
 MESH_IN  = os.path.join(_HERE, r"{mesh_in}")
 CASE_OUT = os.path.join(_HERE, r"{case_out}")
-ITER     = int(os.environ.get("FTHX_ITER", "{iterations}"))
+ITER     = int(os.environ.get("FTHX_ITER", "0") or 0)
+if ITER == 0:
+    # env 는 이 클러스터의 fluent 래퍼 LSF 잡까지 닿지 않음 (실측 2582515)
+    # — go.sh 가 solve 스테이지에서 _iter 파일로 전달함
+    _itf = os.path.join(_HERE, "_iter")
+    if os.path.exists(_itf):
+        try:
+            ITER = int(open(_itf).read().strip() or 0)
+        except Exception:
+            ITER = 0
+if ITER == 0:
+    ITER = int("{iterations}")
+print("ITER = %d  (env %r / _iter %s)" % (
+    ITER, os.environ.get("FTHX_ITER"),
+    "있음" if os.path.exists(os.path.join(_HERE, "_iter")) else "없음"))
 
 # ── 유도된 값 ──────────────────────────────────────────────
 POROSITY  = {a["porosity"]:.6f}
@@ -1757,7 +1771,21 @@ except NameError:
 
 MESH_IN  = os.path.join(_HERE, r"{mesh_in}")
 CASE_OUT = os.path.join(_HERE, r"{case_out}")
-ITER     = int(os.environ.get("FTHX_ITER", "{iterations}"))
+ITER     = int(os.environ.get("FTHX_ITER", "0") or 0)
+if ITER == 0:
+    # env 는 이 클러스터의 fluent 래퍼 LSF 잡까지 닿지 않음 (실측 2582515)
+    # — go.sh 가 solve 스테이지에서 _iter 파일로 전달함
+    _itf = os.path.join(_HERE, "_iter")
+    if os.path.exists(_itf):
+        try:
+            ITER = int(open(_itf).read().strip() or 0)
+        except Exception:
+            ITER = 0
+if ITER == 0:
+    ITER = int("{iterations}")
+print("ITER = %d  (env %r / _iter %s)" % (
+    ITER, os.environ.get("FTHX_ITER"),
+    "있음" if os.path.exists(os.path.join(_HERE, "_iter")) else "없음"))
 U_MAX    = {fl["u_max_ms"]:.6f}     # m/s, 최소유동면적 기준
 V_FACE   = {fl["V_face_ms"]:.6f}    # m/s, 전면속도 (입구 BC)
 T_IN     = {fl["T_in_K"]:.2f}       # K

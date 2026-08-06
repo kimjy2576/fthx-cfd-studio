@@ -21,7 +21,21 @@ except NameError:
 
 MESH_IN  = os.path.join(_HERE, r"cell_labeled.msh.h5")
 CASE_OUT = os.path.join(_HERE, r"cell.cas.h5")
-ITER     = int(os.environ.get("FTHX_ITER", "0"))
+ITER     = int(os.environ.get("FTHX_ITER", "0") or 0)
+if ITER == 0:
+    # env 는 이 클러스터의 fluent 래퍼 LSF 잡까지 닿지 않음 (실측 2582515)
+    # — go.sh 가 solve 스테이지에서 _iter 파일로 전달함
+    _itf = os.path.join(_HERE, "_iter")
+    if os.path.exists(_itf):
+        try:
+            ITER = int(open(_itf).read().strip() or 0)
+        except Exception:
+            ITER = 0
+if ITER == 0:
+    ITER = int("0")
+print("ITER = %d  (env %r / _iter %s)" % (
+    ITER, os.environ.get("FTHX_ITER"),
+    "있음" if os.path.exists(os.path.join(_HERE, "_iter")) else "없음"))
 U_MAX    = 2.869315     # m/s, 최소유동면적 기준
 V_FACE   = 2.000000    # m/s, 전면속도 (입구 BC)
 T_IN     = 300.15       # K

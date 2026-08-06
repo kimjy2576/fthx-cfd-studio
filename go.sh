@@ -50,6 +50,13 @@ case "${STAGE:-mesh}" in
   solve) JOURNAL=setup.py; MODE="3ddp"; export FTHX_ITER="${ITER:-200}";;
   label) JOURNAL=label.py; MODE="3d -meshing";;   # M2 라벨링 (각도분리+개명)
 esac
+# 반복 수는 파일로도 전달 — 이 클러스터의 fluent 래퍼가 만드는 LSF 잡에는
+# 호출 셸의 env 가 닿지 않음 (실측 2582515: ITER=500 인데 10단계 미실행)
+if [ "${STAGE:-mesh}" = "solve" ]; then
+  echo "${ITER:-200}" > "$DIR/_iter"
+else
+  rm -f "$DIR/_iter" 2>/dev/null
+fi
 OUT=$(fluent $MODE -g -t"$CORES" -i "$JOURNAL" 2>&1)
 echo "$OUT" | sed 's/^/      /'
 JOB=$(echo "$OUT" | grep -oE 'Job <[0-9]+>' | grep -oE '[0-9]+' | head -1)
